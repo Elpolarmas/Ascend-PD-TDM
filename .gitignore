@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+# System/editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+# Log and Temp file
+*.log
+*.tmp

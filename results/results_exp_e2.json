@@ -1,0 +1,80 @@
+{
+  "model": "Qwen3-4B",
+  "mode": "disaggregated_1p1d",
+  "device_prefill": 0,
+  "device_decode": 1,
+  "experiments": [
+    {
+      "label": "disagg_short_4req",
+      "num_requests": 4,
+      "avg_prefill_time_s": 0.072,
+      "avg_decode_time_s": 5.085,
+      "avg_total_time_s": 5.157,
+      "avg_input_tokens": 28,
+      "avg_output_tokens": 800,
+      "throughput_tps": 155.1,
+      "avg_ttft_ms": 17.88,
+      "avg_tpot_ms": 6.39
+    },
+    {
+      "label": "disagg_short_16req",
+      "num_requests": 16,
+      "avg_prefill_time_s": 0.068,
+      "avg_decode_time_s": 5.069,
+      "avg_total_time_s": 5.136,
+      "avg_input_tokens": 112,
+      "avg_output_tokens": 3200,
+      "throughput_tps": 623.0,
+      "avg_ttft_ms": 4.23,
+      "avg_tpot_ms": 1.59
+    },
+    {
+      "label": "disagg_short_32req",
+      "num_requests": 32,
+      "avg_prefill_time_s": 0.08,
+      "avg_decode_time_s": 5.331,
+      "avg_total_time_s": 5.411,
+      "avg_input_tokens": 224,
+      "avg_output_tokens": 6400,
+      "throughput_tps": 1182.8,
+      "avg_ttft_ms": 2.51,
+      "avg_tpot_ms": 0.84
+    },
+    {
+      "label": "disagg_long_4req",
+      "num_requests": 4,
+      "avg_prefill_time_s": 0.063,
+      "avg_decode_time_s": 5.207,
+      "avg_total_time_s": 5.27,
+      "avg_input_tokens": 232,
+      "avg_output_tokens": 800,
+      "throughput_tps": 151.8,
+      "avg_ttft_ms": 15.8,
+      "avg_tpot_ms": 6.54
+    },
+    {
+      "label": "disagg_long_16req",
+      "num_requests": 16,
+      "avg_prefill_time_s": 0.108,
+      "avg_decode_time_s": 5.061,
+      "avg_total_time_s": 5.169,
+      "avg_input_tokens": 928,
+      "avg_output_tokens": 3200,
+      "throughput_tps": 619.0,
+      "avg_ttft_ms": 6.76,
+      "avg_tpot_ms": 1.59
+    },
+    {
+      "label": "disagg_mixed_16req",
+      "num_requests": 16,
+      "avg_prefill_time_s": 0.104,
+      "avg_decode_time_s": 5.278,
+      "avg_total_time_s": 5.383,
+      "avg_input_tokens": 520,
+      "avg_output_tokens": 3200,
+      "throughput_tps": 594.5,
+      "avg_ttft_ms": 6.52,
+      "avg_tpot_ms": 1.66
+    }
+  ]
+}

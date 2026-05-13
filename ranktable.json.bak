@@ -1,0 +1,21 @@
+{
+    "version": "1.2",
+    "server_count": "1",
+    "prefill_device_list": [
+        {
+            "server_id": "172.17.0.3",
+            "device_id": "0",
+            "device_ip": "172.17.0.3",
+            "cluster_id": "1"
+        }
+    ],
+    "decode_device_list": [
+        {
+            "server_id": "172.17.0.3",
+            "device_id": "1",
+            "device_ip": "172.17.0.3",
+            "cluster_id": "2"
+        }
+    ],
+    "status": "completed"
+}

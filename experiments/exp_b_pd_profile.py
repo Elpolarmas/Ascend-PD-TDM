@@ -38,7 +38,11 @@ class DCMISampler:
     METRIC_HBM_USAGE = 6
 
     def __init__(self, device_id=0, hbm_bw_interval=0.005, aicore_interval=0.1):
+        # device_id here is the per-NPU index (0..N-1); DCMI addresses each
+        # 910B3 as its own card_id with a single device_id=0 inside.
         self.device_id = device_id
+        self.card_id = device_id
+        self.inner_device_id = 0
         self.hbm_bw_interval = hbm_bw_interval  # ~5ms between HBM BW samples
         self.aicore_interval = aicore_interval    # ~100ms between AICore samples
 
@@ -59,7 +63,7 @@ class DCMISampler:
     def _read_metric(self, metric_type):
         rate = ctypes.c_uint(0)
         ret = self.dcmi.dcmi_get_device_utilization_rate(
-            0, self.device_id, metric_type, ctypes.byref(rate))
+            self.card_id, self.inner_device_id, metric_type, ctypes.byref(rate))
         if ret == 0:
             return rate.value
         return None
@@ -176,8 +180,8 @@ def run_mixed(llm):
     return llm.generate(prompts, sp)
 
 
-def run_scenario(llm, scenario_name, runner_fn, sampler):
-    """Run a scenario with DCMI sampling."""
+def run_scenario(llm, scenario_name, runner_fn, samplers):
+    """Run a scenario with DCMI sampling on all TP devices."""
     print(f"\n--- Scenario: {scenario_name} ---")
 
     # Warmup
@@ -185,16 +189,27 @@ def run_scenario(llm, scenario_name, runner_fn, sampler):
     _ = llm.generate(["warmup"], SamplingParams(max_tokens=5, temperature=0.0))
     time.sleep(0.5)
 
-    sampler.start()
+    for s in samplers:
+        s.start()
     t0 = time.perf_counter()
     outputs = runner_fn(llm)
     elapsed = time.perf_counter() - t0
-    sampler.stop()
+    for s in samplers:
+        s.stop()
 
     total_in = sum(len(o.prompt_token_ids) for o in outputs if o.prompt_token_ids)
     total_out = sum(len(o.outputs[0].token_ids) for o in outputs)
 
-    stats = sampler.summary()
+    per_card = {f"card{s.device_id}": s.summary() for s in samplers}
+
+    # Averaged across cards for headline numbers
+    def avg(key, metric):
+        vals = [per_card[c][metric]["avg"] for c in per_card]
+        return round(sum(vals) / len(vals), 1)
+    dcmi_avg = {
+        "hbm_bw": {"avg": avg("avg", "hbm_bw")},
+        "aicore": {"avg": avg("avg", "aicore")},
+    }
 
     result = {
         "scenario": scenario_name,
@@ -204,16 +219,17 @@ def run_scenario(llm, scenario_name, runner_fn, sampler):
         "total_output_tokens": total_out,
         "input_tps": round(total_in / elapsed, 1),
         "output_tps": round(total_out / elapsed, 1),
-        "dcmi": stats,
+        "dcmi": dcmi_avg,
+        "dcmi_per_card": per_card,
     }
 
     print(f"  Time: {elapsed:.2f}s | In: {total_in} tok | Out: {total_out} tok")
-    print(f"  AICore:  avg={stats['aicore']['avg']}% "
-          f"min={stats['aicore']['min']}% max={stats['aicore']['max']}% "
-          f"({stats['aicore']['count']} samples)")
-    print(f"  HBM BW:  avg={stats['hbm_bw']['avg']}% "
-          f"min={stats['hbm_bw']['min']}% max={stats['hbm_bw']['max']}% "
-          f"({stats['hbm_bw']['count']} samples)")
+    for cid, stats in per_card.items():
+        print(f"  [{cid}] AICore avg={stats['aicore']['avg']}% "
+              f"max={stats['aicore']['max']}% | "
+              f"HBM_BW avg={stats['hbm_bw']['avg']}% "
+              f"max={stats['hbm_bw']['max']}% "
+              f"({stats['aicore']['count']}/{stats['hbm_bw']['count']} samples)")
 
     return result
 
@@ -223,30 +239,37 @@ def main():
     parser.add_argument("--model", type=str,
                         default="/vllm-workspace/models/models/Qwen3-0.6B")
     parser.add_argument("--gpu-mem", type=float, default=0.9)
+    parser.add_argument("--tp", type=int, default=1,
+                        help="tensor parallel size")
     parser.add_argument("--output", type=str,
-                        default="/vllm-workspace/lzn-pro/results_exp_b.json")
+                        default="/vllm-workspace/Ascend-PD-TDM/results/results_exp_b.json")
     args = parser.parse_args()
 
     from vllm import LLM
 
-    print(f"Loading model: {args.model}")
+    print(f"Loading model: {args.model} (TP={args.tp})")
     llm = LLM(
         model=args.model,
         gpu_memory_utilization=args.gpu_mem,
         max_model_len=4096,
+        tensor_parallel_size=args.tp,
     )
     print("Model loaded.")
 
-    sampler = DCMISampler()
-    all_results = {"model": os.path.basename(args.model), "scenarios": []}
+    samplers = [DCMISampler(device_id=i) for i in range(args.tp)]
+    all_results = {
+        "model": os.path.basename(args.model),
+        "tp": args.tp,
+        "scenarios": [],
+    }
 
     # Run 3 scenarios
     all_results["scenarios"].append(
-        run_scenario(llm, "prefill_heavy", run_prefill_heavy, sampler))
+        run_scenario(llm, "prefill_heavy", run_prefill_heavy, samplers))
     all_results["scenarios"].append(
-        run_scenario(llm, "decode_heavy", run_decode_heavy, sampler))
+        run_scenario(llm, "decode_heavy", run_decode_heavy, samplers))
     all_results["scenarios"].append(
-        run_scenario(llm, "mixed", run_mixed, sampler))
+        run_scenario(llm, "mixed", run_mixed, samplers))
 
     # Save
     with open(args.output, "w") as f:

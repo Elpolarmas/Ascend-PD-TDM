@@ -5,7 +5,7 @@
         {
             "server_id": "172.17.0.3",
             "device_id": "0",
-            "device_ip": "172.17.0.3",
+            "device_ip": "10.0.0.1",
             "cluster_id": "1"
         }
     ],
@@ -13,7 +13,7 @@
         {
             "server_id": "172.17.0.3",
             "device_id": "1",
-            "device_ip": "172.17.0.3",
+            "device_ip": "10.0.0.2",
             "cluster_id": "2"
         }
     ],

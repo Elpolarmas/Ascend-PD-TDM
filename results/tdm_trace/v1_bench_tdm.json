@@ -1,0 +1,35 @@
+{
+  "mode": "tdm",
+  "model": "/vllm-workspace/models/models/Qwen3-8B",
+  "tp": 2,
+  "num_prompts": 16,
+  "max_tokens": 128,
+  "load_time_s": 97.03,
+  "batch_wall_s": 3.368,
+  "total_input_tokens": 279,
+  "total_output_tokens": 2048,
+  "input_throughput_tps": 82.83,
+  "output_throughput_tps": 608.01,
+  "n_records_used": 16,
+  "ttft_ms": {
+    "mean": 29.082,
+    "p50": 26.393,
+    "p99": 39.625,
+    "min": 23.703,
+    "max": 39.625
+  },
+  "tpot_ms": {
+    "mean": 25.542,
+    "p50": 25.583,
+    "p99": 26.298,
+    "min": 25.128,
+    "max": 26.298
+  },
+  "e2e_ms": {
+    "mean": 3272.889,
+    "p50": 3275.348,
+    "p99": 3363.567,
+    "min": 3217.602,
+    "max": 3363.567
+  }
+}

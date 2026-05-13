@@ -1,0 +1,65 @@
+{
+  "wall_time_s": 147.1,
+  "duration_s": 30.0,
+  "warmup_s": 5.0,
+  "qps_points": [
+    2.0
+  ],
+  "slo_ttft_ms": 500.0,
+  "slo_tpot_ms": 50.0,
+  "configs": {
+    "c4_pd": [
+      {
+        "config_name": "c4_pd",
+        "workload_name": "poisson_qps2.0_dur30s",
+        "qps_target": 2.0,
+        "duration_s": 30.0,
+        "warmup_s": 5.0,
+        "base_url": "http://127.0.0.1:8000",
+        "model": "/vllm-workspace/models/models/Qwen3-8B",
+        "tracker_jsonl": "/vllm-workspace/Ascend-PD-TDM/results/tdm_trace/qps_sweep_c4_pd_req.jsonl",
+        "n_submitted": 53,
+        "n_ok": 53,
+        "n_err": 0,
+        "wallclock_s": 63.954,
+        "qps_actual_arrival": 1.767,
+        "window": {
+          "window_s": [
+            5.0,
+            30.0
+          ],
+          "n_in_window": 46,
+          "n_ok": 46,
+          "n_matched": 0,
+          "n_unmatched": 46,
+          "n_meet_slo": 0,
+          "ttft_ms": {
+            "mean": null,
+            "p50": null,
+            "p99": null,
+            "min": null,
+            "max": null
+          },
+          "tpot_ms_mean": {
+            "mean": null,
+            "p50": null,
+            "p99": null,
+            "min": null,
+            "max": null
+          },
+          "e2e_ms": {
+            "mean": 15360.605,
+            "p50": 11520.488,
+            "p99": 37180.287,
+            "min": 2137.772,
+            "max": 37180.287
+          },
+          "output_throughput_tok_s": 384.28,
+          "goodput_tok_s": 0.0,
+          "slo_ttft_ms": 500.0,
+          "slo_tpot_ms": 50.0
+        }
+      }
+    ]
+  }
+}

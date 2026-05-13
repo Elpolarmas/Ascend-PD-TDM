@@ -9,7 +9,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
 
-FIGDIR = "/vllm-workspace/lzn-pro/figures"
+FIGDIR = "/vllm-workspace/Ascend-PD-TDM/figures"
 os.makedirs(FIGDIR, exist_ok=True)
 
 plt.rcParams.update({
@@ -44,88 +44,145 @@ def arrow(ax, xy_from, xy_to, color='#444', lw=1.7, style='->', ls='-', curve=0.
 
 
 def plot_architecture_main():
-    fig, ax = plt.subplots(figsize=(13, 6.5))
-    ax.set_xlim(0, 13); ax.set_ylim(0, 6.5); ax.axis('off')
+    """Main architecture diagram — Layer 1 internally split into
+    iteration-scale (solid) and window-scale (dashed) sub-bands so the
+    two-timescale closed loop is explicit at the §3.1 framework level."""
+    fig, ax = plt.subplots(figsize=(13.5, 7.6))
+    ax.set_xlim(0, 13.5); ax.set_ylim(-0.5, 7.6); ax.axis('off')
     ax.set_title(
         'SLO-Adaptive P/D Time-Division Multiplexing — Three-Layer Architecture',
         fontsize=13, fontweight='bold', pad=14,
     )
 
-    # Request source (top-left)
-    round_box(ax, 0.6, 5.35, 2.8, 0.65, C_EP, E_EP)
-    ax.text(2.0, 5.675, 'Incoming Requests',
+    DASHED = (0, (5, 3))
+
+    # Source / sink boxes (top row)
+    round_box(ax, 0.6, 6.20, 2.8, 0.65, C_EP, E_EP)
+    ax.text(2.0, 6.525, 'Incoming Requests',
             ha='center', va='center', fontsize=10, fontweight='bold')
 
-    # Layer 1: core decision (center, narrowed to leave arrow room)
-    round_box(ax, 3.9, 4.85, 4.8, 1.55, C_L1, E_L1, lw=2.1)
-    ax.text(6.3, 5.90,
+    round_box(ax, 10.3, 6.20, 2.5, 0.65, C_EP, E_EP)
+    ax.text(11.55, 6.525, 'Execution Engine',
+            ha='center', va='center', fontsize=10, fontweight='bold')
+
+    # Layer 1 — taller container so the two-timescale split is visible
+    L1_X, L1_Y, L1_W, L1_H = 3.85, 3.20, 4.95, 3.50
+    round_box(ax, L1_X, L1_Y, L1_W, L1_H, C_L1, E_L1, lw=2.1)
+    ax.text(L1_X + L1_W / 2, L1_Y + L1_H - 0.30,
             'Layer 1  —  SLO-Adaptive Control',
             ha='center', va='center', fontsize=12.3, fontweight='bold', color=E_L1)
-    ax.text(6.3, 5.25,
-            'core decision  ·  iter-level mode + batch\nwindow-level ratio feedback',
-            ha='center', va='center', fontsize=9.1, style='italic', color='#222')
 
-    # Execution engine (top-right)
-    round_box(ax, 10.3, 5.35, 2.5, 0.65, C_EP, E_EP)
-    ax.text(11.55, 5.675, 'Execution Engine',
-            ha='center', va='center', fontsize=10, fontweight='bold')
+    # ─── Iter-scale sub-band (upper) ──────────────────────────────
+    iter_y0 = L1_Y + 1.85
+    iter_h  = 1.20
+    round_box(ax, L1_X + 0.18, iter_y0, L1_W - 0.36, iter_h,
+              '#FFFFFF', '#6A8FCF', lw=1.0, pad=0.025)
+    ax.text(L1_X + 0.30, iter_y0 + iter_h - 0.18,
+            'Iteration scale  ·  every iteration',
+            ha='left', va='top', fontsize=9.6, fontweight='bold',
+            color=E_L1, style='italic')
+    # mini illustration: state → decision → mode+batch (solid)
+    ax.text(L1_X + L1_W / 2, iter_y0 + iter_h / 2 - 0.05,
+            'state  +  advice  +  ratio   →   { mode , batch }',
+            ha='center', va='center', fontsize=10.3, color='#1d1d1d')
+    arrow(ax,
+          (L1_X + 0.55, iter_y0 + 0.20),
+          (L1_X + L1_W - 0.55, iter_y0 + 0.20),
+          color=E_L1, lw=1.4, style='->')
 
-    # Layer 2: advisor (bottom-left)
-    round_box(ax, 3.3, 1.3, 3.5, 2.0, C_L2, E_L2, lw=2.1)
-    ax.text(5.05, 2.70,
-            'Layer 2',
+    # ─── Window-scale sub-band (lower) ────────────────────────────
+    win_y0 = L1_Y + 0.30
+    win_h  = 1.30
+    round_box(ax, L1_X + 0.18, win_y0, L1_W - 0.36, win_h,
+              '#FFFFFF', '#6A8FCF', lw=1.0, pad=0.025)
+    ax.text(L1_X + 0.30, win_y0 + win_h - 0.18,
+            'Window scale  ·  every window (W iters)',
+            ha='left', va='top', fontsize=9.6, fontweight='bold',
+            color=E_L1, style='italic')
+    ax.text(L1_X + L1_W / 2, win_y0 + win_h / 2 - 0.05,
+            'SLO attainment   →   P/D ratio param update\n(smoothed, hard-bound clipped)',
+            ha='center', va='center', fontsize=10.0, color='#1d1d1d')
+    arrow(ax,
+          (L1_X + 0.55, win_y0 + 0.22),
+          (L1_X + L1_W - 0.55, win_y0 + 0.22),
+          color=E_L1, lw=1.4, style='->', ls=DASHED)
+
+    # Internal vertical: window → iter (P/D ratio param feeds decision)
+    arrow(ax, (L1_X + L1_W - 0.55, win_y0 + win_h - 0.05),
+              (L1_X + L1_W - 0.55, iter_y0 + 0.05),
+          color='#444', lw=1.5, style='->')
+    ax.text(L1_X + L1_W - 0.40, (win_y0 + win_h + iter_y0) / 2 - 0.05,
+            'P/D ratio\nparam',
+            ha='left', va='center', fontsize=8.6, color='#444', style='italic')
+
+    # ─── Layer 2 / Layer 3 (bottom row) ───────────────────────────
+    round_box(ax, 3.3, 0.55, 3.5, 2.10, C_L2, E_L2, lw=2.1)
+    ax.text(5.05, 2.05, 'Layer 2',
             ha='center', va='center', fontsize=12.5, fontweight='bold', color=E_L2)
-    ax.text(5.05, 2.25,
-            'Graph-Recognition Module',
+    ax.text(5.05, 1.60, 'Graph-Recognition Module',
             ha='center', va='center', fontsize=10.5, fontweight='bold', color=E_L2)
-    ax.text(5.05, 1.70,
-            'advisor  ·  shape-alignment\nsuggestions to Layer 1',
+    ax.text(5.05, 1.05, 'advisor  ·  shape-alignment\nsuggestions to Layer 1',
             ha='center', va='center', fontsize=9, style='italic', color='#222')
 
-    # Layer 3: introspection (bottom-right)
-    round_box(ax, 7.8, 1.3, 3.5, 2.0, C_L3, E_L3, lw=2.1)
-    ax.text(9.55, 2.70,
-            'Layer 3',
+    round_box(ax, 7.8, 0.55, 3.5, 2.10, C_L3, E_L3, lw=2.1)
+    ax.text(9.55, 2.05, 'Layer 3',
             ha='center', va='center', fontsize=12.5, fontweight='bold', color=E_L3)
-    ax.text(9.55, 2.25,
-            'State-Sampling Module',
+    ax.text(9.55, 1.60, 'State-Sampling Module',
             ha='center', va='center', fontsize=10.5, fontweight='bold', color=E_L3)
-    ax.text(9.55, 1.70,
-            'introspection  ·  offline profile\n+ online low-freq sampling',
+    ax.text(9.55, 1.05, 'introspection  ·  offline profile\n+ online low-freq sampling',
             ha='center', va='center', fontsize=9, style='italic', color='#222')
 
-    # Main horizontal flow at y ≈ 5.7
-    arrow(ax, (3.4, 5.67), (3.9, 5.67), lw=1.8)                    # req -> L1
-    arrow(ax, (8.7, 5.67), (10.3, 5.67), lw=2.2, color=E_L1)       # L1 -> Exec
-    ax.text(9.5, 5.95, 'mode + batch',
-            ha='center', fontsize=9, color=E_L1, fontweight='bold')
+    # ─── Outer flows ──────────────────────────────────────────────
+    # Requests → Layer 1 (iter band, solid)
+    arrow(ax, (3.4, 6.525), (L1_X, iter_y0 + iter_h * 0.55),
+          color='#444', lw=1.7, style='->', curve=-0.05)
 
-    # L2 -> L1 advice (upward-left)
-    arrow(ax, (5.05, 3.3), (5.4, 4.85), color=E_L2, lw=1.8,
-          style='->', ls=(0, (5, 3)), curve=-0.12)
-    ax.text(4.30, 4.10, 'batch-shape\nadvice',
+    # Layer 1 → Engine (mode + batch, solid, iter scale)
+    arrow(ax, (L1_X + L1_W, iter_y0 + iter_h * 0.55), (10.3, 6.525),
+          color=E_L1, lw=2.1, style='->', curve=0.05)
+    ax.text((L1_X + L1_W + 10.3) / 2, iter_y0 + iter_h + 0.45,
+            'mode + batch',
+            ha='center', fontsize=9.2, color=E_L1, fontweight='bold')
+
+    # Engine → Layer 1 (window-scale feedback, dashed)
+    arrow(ax, (11.55, 6.20), (11.55, win_y0 + win_h * 0.50),
+          color='#666', lw=1.5, style='->', ls=DASHED)
+    arrow(ax, (11.55, win_y0 + win_h * 0.50),
+              (L1_X + L1_W, win_y0 + win_h * 0.50),
+          color='#666', lw=1.5, style='->', ls=DASHED)
+    ax.text(11.75, (6.20 + win_y0 + win_h * 0.50) / 2,
+            'SLO attainment\n(per-iter outcomes\naggregated\nover window)',
+            ha='left', va='center', fontsize=8.3, color='#555', style='italic')
+
+    # L2 → Layer 1 iter band (advice, solid — queried per iter).
+    # Route around L1's left side so the arrow does not cross the window band.
+    arrow(ax, (3.30, 2.65), (L1_X, iter_y0 + iter_h * 0.40),
+          color=E_L2, lw=1.7, style='->', curve=-0.32)
+    ax.text(2.30, (2.65 + iter_y0) / 2 + 0.40, 'batch-shape\nadvice',
             ha='center', fontsize=9, color=E_L2, fontweight='bold')
 
-    # L3 -> L1 state (upward-right)
-    arrow(ax, (9.55, 3.3), (8.3, 4.85), color=E_L3, lw=1.8,
-          style='->', ls=(0, (5, 3)), curve=0.15)
-    ax.text(10.20, 4.10, 'hardware\nstate',
+    # L3 → Layer 1 iter band (hardware state, solid).
+    # Route around L1's right side, also avoids the dashed Engine→L1 feedback
+    # which enters the window band lower down.
+    arrow(ax, (11.30, 2.65), (L1_X + L1_W, iter_y0 + iter_h * 0.40),
+          color=E_L3, lw=1.7, style='->', curve=0.32)
+    ax.text(12.30, (2.65 + iter_y0) / 2 + 0.40, 'hardware\nstate',
             ha='center', fontsize=9, color=E_L3, fontweight='bold')
 
-    # L3 -> L2 shape-cost profile (between the two boxes, arrow higher up)
-    arrow(ax, (7.8, 3.05), (6.8, 3.05), color=E_L3, lw=1.8,
-          style='->', ls=(0, (5, 3)))
-    ax.text(7.30, 3.30, 'shape-cost profile',
+    # L3 → L2 shape-cost profile
+    arrow(ax, (7.8, 1.60), (6.8, 1.60), color=E_L3, lw=1.7, style='->')
+    ax.text(7.30, 1.85, 'shape-cost profile',
             ha='center', fontsize=8.7, color=E_L3, fontweight='bold')
 
-    # Next-iter feedback (subtle, along bottom)
-    arrow(ax, (11.5, 5.35), (11.5, 0.55), color='#888', lw=1.0,
-          style='->', ls=(0, (3, 2)), curve=0.0)
-    arrow(ax, (11.5, 0.55), (6.8, 0.55), color='#888', lw=1.0,
-          style='->', ls=(0, (3, 2)))
-    ax.text(11.85, 3.0, 'next iter',
-            rotation=90, ha='center', va='center',
-            fontsize=8.5, color='#777')
+    # ─── Line-style legend (bottom) ───────────────────────────────
+    leg_y = -0.20
+    ax.plot([0.6, 1.55], [leg_y, leg_y], '-', color='#444', lw=1.7)
+    ax.text(1.65, leg_y, 'solid  =  iteration-scale path  (fires per iteration)',
+            ha='left', va='center', fontsize=9.2, color='#222')
+    ax.plot([6.4, 7.35], [leg_y, leg_y], color='#444', lw=1.7, ls=DASHED)
+    ax.text(7.45, leg_y,
+            'dashed  =  window-scale path  (fires per sliding window)',
+            ha='left', va='center', fontsize=9.2, color='#222')
 
     fig.savefig(f'{FIGDIR}/patent_architecture_main.png')
     plt.close(fig)

@@ -1,0 +1,277 @@
+{
+  "wall_time_s": 1240.5,
+  "duration_s": 60.0,
+  "warmup_s": 20.0,
+  "qps_points": [
+    0.0
+  ],
+  "slo_ttft_ms": 500.0,
+  "slo_tpot_ms": 50.0,
+  "configs": {
+    "c1_baseline": [
+      {
+        "config_name": "c1_baseline",
+        "workload_name": "trace_AzureLLMInferenceTrace_code_off570s_dur60s",
+        "qps_target": 0.0,
+        "duration_s": 60.0,
+        "warmup_s": 20.0,
+        "base_url": "http://127.0.0.1:8000",
+        "model": "/vllm-workspace/models/models/Qwen3-8B",
+        "tracker_jsonl": "/vllm-workspace/Ascend-PD-TDM/results/tdm_trace/qps_sweep_c1_baseline_req.jsonl",
+        "n_submitted": 668,
+        "n_ok": 668,
+        "n_err": 0,
+        "wallclock_s": 119.577,
+        "qps_actual_arrival": 11.133,
+        "window": {
+          "window_s": [
+            20.0,
+            60.0
+          ],
+          "n_in_window": 317,
+          "n_ok": 317,
+          "n_matched": 317,
+          "n_unmatched": 0,
+          "n_meet_slo": 4,
+          "ttft_ms": {
+            "mean": 613.435,
+            "p50": 627.155,
+            "p99": 803.468,
+            "min": 27.38,
+            "max": 811.878
+          },
+          "tpot_ms_mean": {
+            "mean": 585.799,
+            "p50": 477.482,
+            "p99": 2034.561,
+            "min": 29.404,
+            "max": 2183.475
+          },
+          "e2e_ms": {
+            "mean": 49185.628,
+            "p50": 49783.768,
+            "p99": 73644.945,
+            "min": 30534.385,
+            "max": 79300.692
+          },
+          "output_throughput_tok_s": 221.68,
+          "goodput_tok_s": 11.57,
+          "slo_ttft_ms": 500.0,
+          "slo_tpot_ms": 50.0
+        }
+      }
+    ],
+    "c2_tdm_m1_chunk2048": [
+      {
+        "config_name": "c2_tdm_m1_chunk2048",
+        "workload_name": "trace_AzureLLMInferenceTrace_code_off570s_dur60s",
+        "qps_target": 0.0,
+        "duration_s": 60.0,
+        "warmup_s": 20.0,
+        "base_url": "http://127.0.0.1:8000",
+        "model": "/vllm-workspace/models/models/Qwen3-8B",
+        "tracker_jsonl": "/vllm-workspace/Ascend-PD-TDM/results/tdm_trace/qps_sweep_c2_tdm_m1_chunk2048_req.jsonl",
+        "n_submitted": 668,
+        "n_ok": 668,
+        "n_err": 0,
+        "wallclock_s": 112.932,
+        "qps_actual_arrival": 11.133,
+        "window": {
+          "window_s": [
+            20.0,
+            60.0
+          ],
+          "n_in_window": 317,
+          "n_ok": 317,
+          "n_matched": 317,
+          "n_unmatched": 0,
+          "n_meet_slo": 3,
+          "ttft_ms": {
+            "mean": 407.96,
+            "p50": 299.256,
+            "p99": 1286.464,
+            "min": 27.462,
+            "max": 1612.295
+          },
+          "tpot_ms_mean": {
+            "mean": 547.352,
+            "p50": 461.454,
+            "p99": 1767.333,
+            "min": 25.878,
+            "max": 2017.519
+          },
+          "e2e_ms": {
+            "mean": 44815.136,
+            "p50": 45249.889,
+            "p99": 68566.736,
+            "min": 25313.526,
+            "max": 73195.151
+          },
+          "output_throughput_tok_s": 221.68,
+          "goodput_tok_s": 1.95,
+          "slo_ttft_ms": 500.0,
+          "slo_tpot_ms": 50.0
+        }
+      }
+    ],
+    "c2_tdm_m31_2048": [
+      {
+        "config_name": "c2_tdm_m31_2048",
+        "workload_name": "trace_AzureLLMInferenceTrace_code_off570s_dur60s",
+        "qps_target": 0.0,
+        "duration_s": 60.0,
+        "warmup_s": 20.0,
+        "base_url": "http://127.0.0.1:8000",
+        "model": "/vllm-workspace/models/models/Qwen3-8B",
+        "tracker_jsonl": "/vllm-workspace/Ascend-PD-TDM/results/tdm_trace/qps_sweep_c2_tdm_m31_2048_req.jsonl",
+        "n_submitted": 668,
+        "n_ok": 668,
+        "n_err": 0,
+        "wallclock_s": 114.542,
+        "qps_actual_arrival": 11.133,
+        "window": {
+          "window_s": [
+            20.0,
+            60.0
+          ],
+          "n_in_window": 317,
+          "n_ok": 317,
+          "n_matched": 317,
+          "n_unmatched": 0,
+          "n_meet_slo": 3,
+          "ttft_ms": {
+            "mean": 420.08,
+            "p50": 301.53,
+            "p99": 1476.6,
+            "min": 30.813,
+            "max": 1605.257
+          },
+          "tpot_ms_mean": {
+            "mean": 505.391,
+            "p50": 411.583,
+            "p99": 1660.617,
+            "min": 30.083,
+            "max": 1828.166
+          },
+          "e2e_ms": {
+            "mean": 44555.286,
+            "p50": 44181.211,
+            "p99": 68101.748,
+            "min": 25627.26,
+            "max": 73886.448
+          },
+          "output_throughput_tok_s": 221.68,
+          "goodput_tok_s": 10.95,
+          "slo_ttft_ms": 500.0,
+          "slo_tpot_ms": 50.0
+        }
+      }
+    ],
+    "c2_tdm_m32_2048": [
+      {
+        "config_name": "c2_tdm_m32_2048",
+        "workload_name": "trace_AzureLLMInferenceTrace_code_off570s_dur60s",
+        "qps_target": 0.0,
+        "duration_s": 60.0,
+        "warmup_s": 20.0,
+        "base_url": "http://127.0.0.1:8000",
+        "model": "/vllm-workspace/models/models/Qwen3-8B",
+        "tracker_jsonl": "/vllm-workspace/Ascend-PD-TDM/results/tdm_trace/qps_sweep_c2_tdm_m32_2048_req.jsonl",
+        "n_submitted": 668,
+        "n_ok": 668,
+        "n_err": 0,
+        "wallclock_s": 114.357,
+        "qps_actual_arrival": 11.133,
+        "window": {
+          "window_s": [
+            20.0,
+            60.0
+          ],
+          "n_in_window": 317,
+          "n_ok": 317,
+          "n_matched": 317,
+          "n_unmatched": 0,
+          "n_meet_slo": 4,
+          "ttft_ms": {
+            "mean": 380.951,
+            "p50": 308.824,
+            "p99": 1093.502,
+            "min": 52.286,
+            "max": 1295.199
+          },
+          "tpot_ms_mean": {
+            "mean": 529.834,
+            "p50": 465.424,
+            "p99": 1660.546,
+            "min": 29.502,
+            "max": 1885.507
+          },
+          "e2e_ms": {
+            "mean": 44784.777,
+            "p50": 45433.823,
+            "p99": 68797.047,
+            "min": 25403.318,
+            "max": 73906.731
+          },
+          "output_throughput_tok_s": 221.68,
+          "goodput_tok_s": 11.18,
+          "slo_ttft_ms": 500.0,
+          "slo_tpot_ms": 50.0
+        }
+      }
+    ],
+    "c3_cp": [
+      {
+        "config_name": "c3_cp",
+        "workload_name": "trace_AzureLLMInferenceTrace_code_off570s_dur60s",
+        "qps_target": 0.0,
+        "duration_s": 60.0,
+        "warmup_s": 20.0,
+        "base_url": "http://127.0.0.1:8000",
+        "model": "/vllm-workspace/models/models/Qwen3-8B",
+        "tracker_jsonl": "/vllm-workspace/Ascend-PD-TDM/results/tdm_trace/qps_sweep_c3_cp_req.jsonl",
+        "n_submitted": 668,
+        "n_ok": 668,
+        "n_err": 0,
+        "wallclock_s": 105.212,
+        "qps_actual_arrival": 11.133,
+        "window": {
+          "window_s": [
+            20.0,
+            60.0
+          ],
+          "n_in_window": 317,
+          "n_ok": 317,
+          "n_matched": 317,
+          "n_unmatched": 0,
+          "n_meet_slo": 2,
+          "ttft_ms": {
+            "mean": 670.515,
+            "p50": 646.253,
+            "p99": 1345.48,
+            "min": 154.38,
+            "max": 1389.14
+          },
+          "tpot_ms_mean": {
+            "mean": 454.012,
+            "p50": 477.073,
+            "p99": 661.524,
+            "min": 27.804,
+            "max": 662.54
+          },
+          "e2e_ms": {
+            "mean": 36668.759,
+            "p50": 36232.031,
+            "p99": 60988.29,
+            "min": 23089.309,
+            "max": 65479.168
+          },
+          "output_throughput_tok_s": 221.68,
+          "goodput_tok_s": 9.65,
+          "slo_ttft_ms": 500.0,
+          "slo_tpot_ms": 50.0
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "wall_time_s": 1154.9,
+  "duration_s": 90.0,
+  "warmup_s": 30.0,
+  "qps_points": [
+    16.0,
+    24.0,
+    32.0
+  ],
+  "slo_ttft_ms": 500.0,
+  "slo_tpot_ms": 50.0,
+  "configs": {
+    "c1_baseline": [],
+    "c2_tdm": []
+  }
+}

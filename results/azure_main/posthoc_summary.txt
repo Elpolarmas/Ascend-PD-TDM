@@ -1,0 +1,83 @@
+====================================================================================================
+Azure trace replay main (L3): 2 traces × 4 configs × 3 seeds × 60s
+  conv at start_offset=1860s (peak 8.4 qps avg, ~506 reqs/60s)
+  code at start_offset=570s  (peak 11.1 qps avg, ~668 reqs/60s)
+====================================================================================================
+
+## conv  meet_slo% (mean±std over 3 seeds)
+
+tier                              C1      M1+chunk          M3.1            C3
+------------------------------------------------------------------------------
+strict                      4.9± 0.9      5.5± 0.4      6.1± 1.0      5.7± 0.8
+ttft500_tpot100            14.6± 0.9     15.5± 0.8     16.7± 1.3     16.1± 0.8
+ttft500_tpot150            55.6± 3.6     60.7± 1.9     64.1± 1.9     68.6± 1.3
+ttft500_tpot200            86.4± 5.1     83.5± 1.5     88.6± 0.6     87.2± 2.2
+ttft1000_tpot200           99.9± 0.2     99.4± 0.6     99.7± 0.3     99.9± 0.2
+ttft1500_tpot300          100.0± 0.0    100.0± 0.0    100.0± 0.0    100.0± 0.0
+ttft2000_tpot500          100.0± 0.0    100.0± 0.0    100.0± 0.0    100.0± 0.0
+
+## code  meet_slo% (mean±std over 3 seeds)
+
+tier                              C1      M1+chunk          M3.1            C3
+------------------------------------------------------------------------------
+strict                      1.6± 0.6      0.5± 0.2      1.3± 0.5      0.6± 0.3
+ttft500_tpot100             2.4± 0.8      4.2± 0.9      5.5± 1.0      1.7± 0.2
+ttft500_tpot150             3.3± 0.9      6.5± 0.5      8.5± 0.8      2.2± 0.3
+ttft500_tpot200             4.3± 0.8     10.5± 0.2     12.2± 1.0      2.8± 0.6
+ttft1000_tpot200           19.2± 0.8     17.8± 0.5     18.8± 0.5      8.6± 0.5
+ttft1500_tpot300           30.6± 0.8     29.0± 1.4     29.2± 1.6     15.2± 0.2
+ttft2000_tpot500           51.3± 1.3     54.5± 1.0     55.2± 2.6     53.1± 3.1
+
+====================================================================================================
+Window stats (mean across seeds)
+====================================================================================================
+
+## conv
+
+metric                            C1      M1+chunk          M3.1            C3
+------------------------------------------------------------------------------
+ttft_p50 (ms)             219.6±30.5    153.3±5.0    150.4±3.9    256.1±3.2
+ttft_p99 (ms)             675.1±4.7    909.1±95.6    811.0±13.2    812.1±61.1
+tpot_p50                  140.4±1.3    137.8±0.5    137.8±0.4    136.3±0.9
+tpot_p99                  179.8±4.0    173.1±5.2    175.7±4.7    173.1±2.8
+e2e_p99 (s)                72.5±0.4     69.7±0.5     69.2±0.2     68.2±0.6
+goodput (tok/s)           130.1±12.2    146.6±3.7    153.6±18.6    149.1±11.0
+out_tput (tok/s)         1036.9±0.0   1036.9±0.0   1036.9±0.0   1036.9±0.0
+
+## code
+
+metric                            C1      M1+chunk          M3.1            C3
+------------------------------------------------------------------------------
+ttft_p50 (ms)             624.9±6.7    242.1±61.2    303.3±6.5    645.8±1.1
+ttft_p99 (ms)             787.5±16.0   1289.7±124.0   1288.6±312.3   1332.5±7.5
+tpot_p50                  493.3±21.8    466.6±16.1    457.4±22.2    489.6±7.2
+tpot_p99                 1967.6±15.0   1765.5±57.5   1720.0±33.6    662.2±3.0
+e2e_p99 (s)                73.4±0.2     68.8±0.9     68.3±0.5     61.0±0.1
+goodput (tok/s)             8.7±5.9      4.0±5.0     12.2±1.2      1.1±0.9
+out_tput (tok/s)          221.7±0.0    221.7±0.0    221.7±0.0    221.7±0.0
+
+====================================================================================================
+Headline Δ (mean±std pp, 3 seeds, paired by seed)
+====================================================================================================
+
+## conv
+
+  tier=strict                  M3.1 - C1 (closed-loop TD=  +1.2± 1.1pp  M3.1 - M1 (PID earn vs st=  +0.6± 0.8pp  M3.1 - C3 (TDM vs chunked=  +0.4± 1.3pp  M1 - C1 (chunk effect on =  +0.6± 0.6pp  C3 - C1 (chunked-prefill =  +0.8± 1.7pp
+  tier=ttft500_tpot100         M3.1 - C1 (closed-loop TD=  +2.2± 0.6pp  M3.1 - M1 (PID earn vs st=  +1.2± 0.6pp  M3.1 - C3 (TDM vs chunked=  +0.6± 2.0pp  M1 - C1 (chunk effect on =  +0.9± 0.6pp  C3 - C1 (chunked-prefill =  +1.5± 1.7pp
+  tier=ttft500_tpot150         M3.1 - C1 (closed-loop TD=  +8.5± 1.9pp  M3.1 - M1 (PID earn vs st=  +3.4± 0.8pp  M3.1 - C3 (TDM vs chunked=  -4.5± 3.1pp  M1 - C1 (chunk effect on =  +5.1± 2.5pp  C3 - C1 (chunked-prefill = +13.0± 4.9pp
+  tier=ttft500_tpot200         M3.1 - C1 (closed-loop TD=  +2.3± 5.4pp  M3.1 - M1 (PID earn vs st=  +5.2± 0.9pp  M3.1 - C3 (TDM vs chunked=  +1.4± 1.8pp  M1 - C1 (chunk effect on =  -2.9± 6.2pp  C3 - C1 (chunked-prefill =  +0.8± 4.8pp
+  tier=ttft1000_tpot200        M3.1 - C1 (closed-loop TD=  -0.2± 0.2pp  M3.1 - M1 (PID earn vs st=  +0.3± 0.5pp  M3.1 - C3 (TDM vs chunked=  -0.2± 0.5pp  M1 - C1 (chunk effect on =  -0.5± 0.5pp  C3 - C1 (chunked-prefill =  +0.0± 0.3pp
+  tier=ttft1500_tpot300        M3.1 - C1 (closed-loop TD=  +0.0± 0.0pp  M3.1 - M1 (PID earn vs st=  +0.0± 0.0pp  M3.1 - C3 (TDM vs chunked=  +0.0± 0.0pp  M1 - C1 (chunk effect on =  +0.0± 0.0pp  C3 - C1 (chunked-prefill =  +0.0± 0.0pp
+  tier=ttft2000_tpot500        M3.1 - C1 (closed-loop TD=  +0.0± 0.0pp  M3.1 - M1 (PID earn vs st=  +0.0± 0.0pp  M3.1 - C3 (TDM vs chunked=  +0.0± 0.0pp  M1 - C1 (chunk effect on =  +0.0± 0.0pp  C3 - C1 (chunked-prefill =  +0.0± 0.0pp
+
+
+## code
+
+  tier=strict                  M3.1 - C1 (closed-loop TD=  -0.3± 0.3pp  M3.1 - M1 (PID earn vs st=  +0.7± 0.7pp  M3.1 - C3 (TDM vs chunked=  +0.6± 0.8pp  M1 - C1 (chunk effect on =  -1.1± 0.8pp  C3 - C1 (chunked-prefill =  -0.9± 0.8pp
+  tier=ttft500_tpot100         M3.1 - C1 (closed-loop TD=  +3.0± 0.2pp  M3.1 - M1 (PID earn vs st=  +1.3± 1.4pp  M3.1 - C3 (TDM vs chunked=  +3.8± 0.8pp  M1 - C1 (chunk effect on =  +1.8± 1.3pp  C3 - C1 (chunked-prefill =  -0.7± 0.7pp
+  tier=ttft500_tpot150         M3.1 - C1 (closed-loop TD=  +5.3± 0.2pp  M3.1 - M1 (PID earn vs st=  +2.0± 1.0pp  M3.1 - C3 (TDM vs chunked=  +6.3± 0.6pp  M1 - C1 (chunk effect on =  +3.3± 1.1pp  C3 - C1 (chunked-prefill =  -1.1± 0.7pp
+  tier=ttft500_tpot200         M3.1 - C1 (closed-loop TD=  +7.9± 0.9pp  M3.1 - M1 (PID earn vs st=  +1.7± 1.1pp  M3.1 - C3 (TDM vs chunked=  +9.4± 1.0pp  M1 - C1 (chunk effect on =  +6.2± 1.0pp  C3 - C1 (chunked-prefill =  -1.5± 0.2pp
+  tier=ttft1000_tpot200        M3.1 - C1 (closed-loop TD=  -0.4± 0.5pp  M3.1 - M1 (PID earn vs st=  +1.1± 0.7pp  M3.1 - C3 (TDM vs chunked= +10.2± 0.5pp  M1 - C1 (chunk effect on =  -1.5± 1.2pp  C3 - C1 (chunked-prefill = -10.6± 0.5pp
+  tier=ttft1500_tpot300        M3.1 - C1 (closed-loop TD=  -1.4± 1.5pp  M3.1 - M1 (PID earn vs st=  +0.2± 1.3pp  M3.1 - C3 (TDM vs chunked= +14.0± 1.6pp  M1 - C1 (chunk effect on =  -1.6± 1.9pp  C3 - C1 (chunked-prefill = -15.4± 0.7pp
+  tier=ttft2000_tpot500        M3.1 - C1 (closed-loop TD=  +3.9± 3.4pp  M3.1 - M1 (PID earn vs st=  +0.7± 3.1pp  M3.1 - C3 (TDM vs chunked=  +2.1± 2.8pp  M1 - C1 (chunk effect on =  +3.2± 0.3pp  C3 - C1 (chunked-prefill =  +1.8± 4.4pp
+

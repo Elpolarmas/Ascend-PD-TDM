@@ -1,669 +1,557 @@
 # Notes
 
-## vllm-ascend PD 架构现状
+> 项目：单卡 NPU 上的 PD 时分复用调度（vllm-ascend 插件）
+> 最近一次大改：2026-05-07，按用户澄清重写框架视图 + 锁定 vllm-ascend v0.11.0rc1
 
-- AscendScheduler（`vllm_ascend/core/scheduler.py`）已有 PD phase 机制，但面向多卡 disaggregation，非单卡时分复用
-- 上游 vLLM V1 调度器（`vllm/v1/core/sched/scheduler.py`）是统一 token-based 模型，无硬性 P/D 分离
+---
+
+## 0. 版本锁定（2026-05-07 决定）
+
+**vllm-ascend = v0.11.0rc1（2025-11-10），CANN 8.3.rc1，torch-npu 2.7.1**——本项目**全部**实验和论文实现锁在这个版本。
+
+### 为什么锁定（不升级）
+
+1. **PR #4623 在 v0.13.0 删除了 AscendScheduler**——上游官方公告原文：*"Ascend Scheduler has been dropped"*。这是我们 TDMScheduler 的父类，整个插件架构的依附点。**v0.13.0+ 没有这个类**，TDMScheduler 没法继承，注入路径 `additional_config.ascend_scheduler_config.scheduler_cls` 也失效。
+2. **没有迁移路径**——PR #4623 的描述就是"删代码 + 让上游 vLLM Scheduler 接管"，没有等价的 phase-aware 替代接口。
+3. **升级到 v0.13+ 会让 C1 baseline 消失**——v0.13.0+ 所有 workload 强制走上游 V1 Scheduler + chunked prefill + FIA kernel，等价于我们当前的 C3 路径。
+4. **我们环境受限**，无法做并行 v0.18.0 supplementary 验证。
+
+### 这个决定的后果（论文叙事必须明写）
+
+- **优势**：v0.11.0rc1 是**最后一个保有 phase-aware AscendScheduler 的版本**，恰好是研究 phase-aware 调度价值的最后窗口
+- **劣势**：审稿人会注意到这是 6 个 release 前的版本，必须在 §implementation 主动写明锁定理由
+- **重新定位**：这反而把 TDM 的故事从"在 NPU 上做调度优化"升级为"vllm-ascend 上游放弃了 phase-aware（PR #4623），我们论证它的价值并提出再引入方案"——systems paper 标准 motivation
+
+### Kernel 性能事实（micro-bench 实测，2026-05-07）
+
+| 内核 op | 路径 | mean / p99 (mixed 1P+7D, q=519) | 相对 |
+|---|---|---|---|
+| `_npu_flash_attention_qlens` | C1 / TDM phase-pure → PrefillCacheHit | 0.088 / 0.119 ms | **基准** |
+| `npu_fused_infer_attention_score` (sparse=3, TND) | C3 / mixed P+D → ChunkedPrefill | 0.234 / 0.705 ms | **慢 2.66×** |
+
+- 同 query/KV/block_table 输入；warmup 20 + 200 iters；两路径需在独立进程跑（同进程 ATB context 冲突）
+- pure_decode bs=64：FIA 慢 **3.43×**；pure_prefill q=1024：FIA 慢 **3.10×**
+- 端到端反映：qps=8 R1 regime 下 C3 TTFT min 67ms vs C1 23ms（**2.9×**），与 36 层 transformer × attention kernel 占比 30-40% 的换算一致
+- vllm-ascend 自己的源码 TODO 标注："*The npu_fused_infer_attention_score op is planned to be utilized in a wider range in upcoming versions*" —— 官方承认此路径仍在过渡
+
+### Kernel 数据的正确解读（重要修正 2026-05-07）
+
+| 路径 | attn_state | 内核 | 速度 |
+|---|---|---|---|
+| **C1 mixed P+D** | `PrefillCacheHit` | `_npu_flash_attention_qlens` (V0) | 快 |
+| **TDM phase-pure P** | `PrefillNoCache` | `_forward_prefill_no_cache` (V0) | 快 |
+| **TDM phase-pure D** | `DecodeOnly` | `_forward_decode_only` (V0) | 快 |
+| **C3 mixed P+D (CP=True)** | `ChunkedPrefill` | `npu_fused_infer_attention_score` (V1 FIA) | 慢 2.7-3.4× |
+
+**关键**：C1 和 TDM 都走 V0 dedicated 快路径——FIA kernel 慢这件事**只解释 C3 < C1，不解释 TDM 输 C1**。
+
+→ TDM 在 8K canonical (短 prompt) sweep 上输 C1，根因不是 kernel，是 **C1 hybrid 在短 prompt 下利用率天然高**（mixed iter 让 decode 顺路搭车）。TDM 的真正赢点必须从 **workload 维度** 找，详见 `current_task.md §1.3`。
+
+### M3 设计原则（基于 kernel 现实）
+
+**phase-pure 严格遵守**——TDM 内部 prefill chunking 必须保证：
+- 单个 iter **要么 pure-prefill 要么 pure-decode**，绝不让 mixed P+D 出现在同一 iter
+- 这样 attn_state 走 `PrefillNoCache` / `PrefillCacheHit` / `DecodeOnly`（dedicated kernel），不退化到 `ChunkedPrefill` 的 FIA 慢路径
+- **重要**：phase-pure 不是为了让 TDM "比 C1 走更快的 kernel"（两者一样快），而是**避免 TDM 不小心退化到 C3 的慢路径**——是守底线，不是抢上限
+
+---
+
+## 1. 框架视图（修订版 2026-05-07）
+
+### 1.1 两个模块的分工
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  SLO 自适应控制模块  ★ 核心                                     │
+│  输入：                                                        │
+│    · SLO 违例率 (ttft / tpot)        ← 主因素                   │
+│    · 请求队列状态 (waiting_age, queue_depth, kv_pressure)        │
+│    · 硬件利用率 (NPU AICore busy%, HBM BW%)                      │
+│  输出（两个时间维度）：                                          │
+│    · iteration 维度：本 iter 走 P / 走 D / 切多大 prefill chunk    │
+│    · 滑动窗口维度：未来 N iter 的 P:D 比例 / 切片策略 target       │
+└──────▲────────────────────────────────────────────────────────┘
+       │ batch_size_for_decode (绑 ACL graph capture buckets)
+       │ chunk_size_for_prefill (匹配 graph 边界 / 控制单次 iter 时长)
+┌──────┴────────────────────────────────────────────────────────┐
+│  Graph 自适应控制模块  ── 辅助（喂硬件知识）                       │
+│  · 主要面向 Decode：选 ACL Graph 的最优 batch size bucket          │
+│  · vllm-ascend 静态预编译一组 graph sizes（如 {1,2,8,16,…,512}）  │
+│  · 给 SLO 控制器一张"哪个 size 跑得最快"的字典                     │
+└──────────────────────────────────────────────────────────────┘
+```
+
+**关键澄清**：graph-aware 不是独立目标，是 SLO 控制器的下游算力字典。
+
+### 1.2 Prefill chunking：与 C3 chunked prefill 的本质区别
+
+| 维度 | vLLM Chunked Prefill (C3) | 本项目的 TDM-内部 chunked prefill |
+|---|---|---|
+| **P/D 是否共享 forward** | **是**（in-iter 混合 batch） | **否**（pure-phase per iter） |
+| 切分粒度 | 单 iter 内 prefill 占多少 token | 单 prefill 占多少**连续独占 iter**，何时让位 D |
+| 切分依据 | 静态 `max_num_batched_tokens` 预算 | 动态：SLO + queue + HW 反馈 |
+| Decode batch size | 不可控（被 prefill 挤剩多少算多少） | **graph-aware 锁定**到 bucket |
+| Kernel 形状 | 不规整（prefill chunk + decode tokens 拼） | 纯净（prefill 满帧 / decode bucket） |
+| 哲学 | 空间混叠 | 时间分片 |
+
+**当前设计选择**（2026-05-07 用户拍板）：
+- prefill chunk **按 token 数切**（与 decode graph bucket 对应更直接）
+- graph buckets **静态**（vllm-ascend 编译期固定）
+- sliding window **静态长度**，8 vs 几百待实测
+
+### 1.3 当前问题
+
+C3 在业界是 SOTA，但我们 8K canonical 实测 C3 全谱输 C1（goodput -14%~-22%, ttft +54%~+125%）—— **数据反常**。可能是 vllm-ascend 上的 chunked prefill 实现 / Ascend kernel 特性问题，需要后续核查。这件事影响"主对比是 C3"的论文叙事根基。
+
+---
+
+## 2. 项目背景 + 代码路径
+
+### 2.1 vllm-ascend PD 架构现状
+
+- AscendScheduler（`vllm_ascend/core/scheduler.py`）已有 PD phase 字段，但原本面向多卡 disaggregation
+- 上游 vLLM V1（`vllm/v1/core/sched/scheduler.py`）是 token-based 统一调度，无硬性 P/D 分离
 - AscendAttentionState（`vllm_ascend/attention/attention_v1.py`）：PrefillNoCache / PrefillCacheHit / DecodeOnly / ChunkedPrefill / SpecDecoding
-- 现有局限：phase 切换"一刀切"，无动态 P↔D 策略，无单卡时分复用优化
 
-## Baseline 实验（2026-03-31，单卡 910B3）
+### 2.2 核心代码路径
 
-### 环境
-- 2 × Ascend 910B3（64GB HBM），CANN 8.3.RC1，torch 2.7.1（华为镜像源），vllm 0.11.0，vllm-ascend 0.11.0rc1
-
-### 性能数据
-
-| Model | Prompt | TTFT(ms) | TPOT(ms) | Batch OutTPS |
-|---|---|---|---|---|
-| Qwen3-0.6B | short(~7tok) | 28.2 | 17.97 | 368.1 |
-| Qwen3-0.6B | long(~53tok) | 27.6 | 15.59 | 275.0 |
-| Qwen3-4B | short(~7tok) | 33.9 | 18.98 | 380.5 |
-| Qwen3-4B | long(~53tok) | 30.0 | 19.02 | 229.7 |
-
-### 关键发现
-- TTFT 极低（28-34ms），NPU 算力在 prefill 阶段有大量冗余
-- TPOT ~18-19ms，decode 是 memory-bandwidth bound，0.6B→4B 差异极小
-- Prefill 占总时间 <1%，decode 主导延迟 → **时分复用机会明确**
-
-## 实验 A：ACL Graph 行为分析（2026-04-01，Qwen3-4B，单卡 910B3）
-
-### 关键机制发现（源码分析）
-- vLLM **自动 pad** batch size 到最近的已编译 graph shape（`pad_for_cudagraph()`）
-- 仅当 total_tokens > max_compiled_size（512）时才 eager fallback
-- 因此 Graph-Aware Batch Shaping 的目标是**减少 padding 浪费**，不是避免 eager
-
-### Test 1: Graph 配置
-- 48 种已编译 shape，范围 [1, 512]，平均间距 10.9
-- 具体 sizes: 1, 2, 8, 16, 32, 40, 48, 64, 72, 88, ..., 504, 512
-- 小 batch 区域间距大（1→2→8→16），大 batch 区域间距 ~8
-
-### Padding 浪费分析
-
-| actual_bs | padded_to | waste% | 说明 |
-|---|---|---|---|
-| 1 | 1 | 0% | 精确匹配 |
-| 3 | 8 | 62.5% | 最坏情况之一 |
-| 5 | 8 | 37.5% | |
-| 8 | 8 | 0% | 精确匹配 |
-| 17 | 32 | 46.9% | |
-| 32 | 32 | 0% | 精确匹配 |
-
-- Prefill 阶段（bs 1-8）：平均 **23.4%** 浪费
-- Decode 阶段（bs 1-64）：平均 **16.5%** 浪费
-
-### Test 2: Padding 对吞吐影响
-- 精确匹配 vs pad+1 的 per_token 延迟差异 <5%（都走 graph）
-- Padding 主要浪费算力，不改变执行模式
-
-### Test 3: Eager 边界
-
-| batch_size | mode | per_tok(ms) | throughput(tok/s) |
-|---|---|---|---|
-| 496 | GRAPH | 74.9 | 6620.9 |
-| 512 | GRAPH | 81.8 | 6258.2 |
-| 513 | EAGER | 98.5 | 5208.6 |
-| 528 | EAGER | 96.2 | 5491.0 |
-| 544 | EAGER | 101.5 | 5360.1 |
-
-- Eager 退化：**+26%** per_token 延迟（78ms → 99ms）
-
-### Test 4: Graph 编译耗时
-- Eager 模式加载：29.7s
-- Graph 模式加载：114.1s
-- **Graph 编译开销：84.4s**（启动时一次性，48 个 shape）
-
-### 对 TDM 的启示
-1. TDM decode batch 通常 <512，不会触发 eager，graph 切换无额外开销
-2. Graph-Aware Batch Shaping 核心价值：减少 padding 浪费（尤其 prefill 小 batch 23.4%）
-3. TDM 让 P/D batch size 更可预测 → 更好覆盖已编译 shape → 减少浪费
-4. 启动编译 84.4s 是固定成本，TDM 不增加额外编译负担
-
----
-
-## 实验 B：NPU P/D 资源利用率画像（2026-04-02，Qwen3-4B，单卡 910B3）
-
-### 实验设计
-- **Prefill-heavy**：200 条唯一长 prompt（~580 tok），max_tokens=1，分 4 批提交保持 NPU 持续忙碌
-- **Decode-heavy**：16 条短 prompt（"Hi"），max_tokens=512，最大化 decode 占比
-- **Mixed**：5 条混合长度 prompt，max_tokens=150
-- **采集方式**：DCMI 后台线程持续采样 HBM BW（~5ms 间隔）和 AICore（~100ms 间隔）
-- **注意**：每条 prompt 添加唯一前缀避免 prefix caching 命中
-
-### 结果
-
-| Scenario | AICore% | HBM BW% | In tok | Out tok | Time(s) | AICore samples | HBM BW samples |
-|---|---|---|---|---|---|---|---|
-| prefill_heavy | **69.8** | **15.8** | 117290 | 200 | 5.49 | 34 | 882 |
-| decode_heavy | **42.6** | **25.1** | 16 | 8192 | 10.89 | 67 | 1716 |
-| mixed | 33.9 | 26.1 | 45 | 750 | 3.69 | 23 | 603 |
-
-### 关键发现
-1. **Prefill = compute-bound**：AICore 69.8%，HBM BW 15.8% → 算力利用率高，带宽利用低
-2. **Decode = memory-bandwidth-bound**：AICore 42.6%，HBM BW 25.1% → 带宽利用更高，算力相对空闲
-3. **资源互补量化**：Prefill 的 AICore 利用率是 Decode 的 **1.64×**，Decode 的 HBM BW 是 Prefill 的 **1.59×**
-4. **TDM 机会确认**：两阶段资源需求互补，时分复用可在时间维度上提升整体资源利用率
-5. **Decode 主导时间**：decode_heavy 10.89s vs prefill_heavy 5.49s（2:1），decode 阶段有约 27% AICore 空闲可被利用
-
-### 对 TDM 方案的启示
-- Prefill 算力利用率高（69.8%）但带宽有余（15.8%）→ TDM 在 decode 间隙插入 prefill 可充分利用闲置算力
-- Decode 带宽利用率更高（25.1%）但算力有余（42.6%）→ P/D 交替执行让两种资源交替饱和
-- 混合场景 AICore 33.9%、HBM BW 26.1% → 接近 decode-heavy，说明实际 serving 以 decode 为主
-
----
-
-## 实验 C：DCMI 在线采样对推理的影响（2026-04-02，Qwen3-4B，单卡 910B3）
-
-### 实验设计
-- Baseline：16 条 prompt × 200 tokens，8 轮（取后 7 轮平均）
-- 对比：无采样 / HBM BW 2ms / 5ms / 10ms / 20ms / AICore 100ms
-- DCMI 采样在 Python 后台 daemon 线程中执行
-
-### 结果
-
-| Config | TPS (tok/s) | Overhead |
-|---|---|---|
-| no_sampling (baseline) | 670.1 | 0% |
-| hbm_bw_2ms | 621.4 | **7.3%** |
-| hbm_bw_5ms | 612.2 | **8.6%** |
-| hbm_bw_10ms | 615.6 | **8.1%** |
-| hbm_bw_20ms | 618.3 | **7.7%** |
-| aicore_100ms | 683.1 | ~0% (噪声) |
-
-### 关键发现
-1. **HBM BW 采样开销与频率无关**：2ms→20ms 都是 ~7-9%，说明开销是**后台线程存在本身**（GIL 争用 / NPU driver 锁），而非 DCMI 调用次数
-2. **AICore 100ms 采样开销可忽略**：354→683 tok/s 范围内波动在噪声内
-3. **~8% 开销是否可接受**：如果 TDM 带来 >10% 的吞吐提升，则 DCMI 开销被覆盖
-
-### 对 TDM 方案的启示
-1. **AICore 低频采样可直接使用**（~0% 开销）
-2. **HBM BW 连续采样需优化**：
-   - 方案 A：仅在 phase 切换边界采样（而非每 iteration），大幅降低采样次数
-   - 方案 B：用 C 扩展替代 Python ctypes 调用，避免 GIL 争用
-   - 方案 C：离线画像替代在线采样，运行时查表
-3. **推荐策略**：在线用 AICore 100ms 监测 + 离线画像表覆盖 HBM BW 信息，避免 8% 开销
-
----
-
-## 实验 D：不同并发负载下的表现（2026-04-02，Qwen3-4B，单卡 910B3）
-
-### 实验设计
-- 并发数：1, 2, 4, 8, 16, 32, 64
-- 每请求生成 200 tokens，8 轮取后 7 轮平均
-- Prompt: "Explain the concept of machine learning in simple terms."（~11 tok）
-
-### 结果
-
-| Conc | TTFT(ms) | TPOT(ms) | TPS (tok/s) | Time(ms) |
-|---|---|---|---|---|
-| 1 | 27.7 | 21.38 | 46.7 | 4282 |
-| 2 | 25.4 | 25.10 | 79.7 | 5021 |
-| 4 | 15.0 | 22.19 | 180.5 | 4431 |
-| 8 | 6.5 | 24.46 | 328.2 | 4875 |
-| 16 | 4.3 | 23.17 | 693.4 | 4615 |
-| 32 | 2.3 | 26.63 | 1207.1 | 5302 |
-| 64 | 1.9 | 23.56 | 2728.5 | 4691 |
-
-### 关键发现
-1. **TPOT 几乎恒定**：21-27ms 范围内（1→64 并发），decode 阶段高度 batching 友好
-2. **TTFT 随并发下降**：27.7ms（1 并发）→ 1.9ms（64 并发），因为 batch prefill 效率高
-3. **吞吐近线性扩展**：1→64 并发带来 58.4× 吞吐提升，说明 NPU 在低并发下严重 underutilized
-4. **无 TPOT 退化拐点**：在 64 并发内 TPOT 仍未翻倍 → 可能需要测试更高并发（128, 256）
-5. **总时间几乎恒定**：~4.5s（除 concurrency=2,32 略高），说明 batching 吸收了并发增加
-
-### 对 TDM 方案的启示
-1. **低并发（1-4）是 TDM 最佳场景**：NPU 严重 underutilized（46-180 tok/s vs 峰值 2728），有大量空闲算力可用于穿插 prefill
-2. **高并发（32-64）TDM 收益递减**：NPU 利用率已较高，但 TPOT 仍稳定 → 说明还有空间
-3. **TPOT 恒定特性**：意味着在 decode 间隙插入 prefill 不会严重影响现有 decode 请求的延迟
-4. **需要更高并发测试**：找到 TPOT 退化拐点，确定 TDM 在何时需要更谨慎的调度
-
----
-
-## 实验 E（旧）：PD Unified vs PD Phased 对比（2026-04-02，Qwen3-4B，**单卡** 910B3）
-
-> **注意**：此实验存在公平性问题——仅使用 1 张卡，且 Ascend 默认关闭 chunked prefill。已被实验 E3 取代。
-
-### 实验设计
-- **PD Unified**：默认 continuous batching，P/D 混在同一 batch，**chunked prefill OFF**
-- **PD Phased**：`enable_pd_transfer=True`，先 prefill 全部请求，再 decode 全部
-- 6 种 workload：短 prompt(4/16/32 req) + 长 prompt(4/16 req) + 混合(16 req)，每请求生成 200 tokens
-
-### 结果
-
-| Workload | Unified TPS | Phased TPS | 变化 |
-|---|---|---|---|
-| short_4req | 157.9 | 173.1 | **+9.6%** |
-| short_16req | 759.4 | 647.3 | **-14.8%** |
-| short_32req | 1460.5 | 1305.6 | **-10.6%** |
-| long_4req | 185.1 | 184.4 | ~0% |
-| long_16req | 629.2 | 697.3 | **+10.8%** |
-| mixed_16req | 749.1 | 599.4 | **-20.0%** |
-
----
-
-## 实验 E2：PD Disaggregated 1P1D（2026-04-02，Qwen3-4B，2×910B3）
-
-### 实验设计
-- Device 0 = Prefill（kv_producer），Device 1 = Decode（kv_consumer）
-- 使用 `LLMDataDistCMgrConnector` + 手工构造 ranktable（同机无 ROCE，填容器 IP 172.17.0.3 成功）
-- 8 轮，去首轮，6 种 workload，每请求生成 200 tokens
-- **chunked prefill 自动开启**（KV transfer 模式下 vLLM V1 默认行为）
-
-### 结果
-
-| Workload | TPS | TTFT(ms) | TPOT(ms) | P_time(s) | D_time(s) | Total(s) |
-|---|---|---|---|---|---|---|
-| short_4req | 155.1 | 17.9 | 6.39 | 0.072 | 5.085 | 5.157 |
-| short_16req | 623.0 | 4.2 | 1.59 | 0.068 | 5.069 | 5.136 |
-| short_32req | 1182.8 | 2.5 | 0.84 | 0.080 | 5.331 | 5.411 |
-| long_4req | 151.8 | 15.8 | 6.54 | 0.063 | 5.207 | 5.270 |
-| long_16req | 619.0 | 6.8 | 1.59 | 0.108 | 5.061 | 5.169 |
-| mixed_16req | 594.5 | 6.5 | 1.66 | 0.104 | 5.278 | 5.383 |
-
-### 关键发现
-- Prefill 耗时极短（60-108ms），decode 占 >98% 时间
-- ranktable 在同机场景可手工构造，无需 ROCE/hccn_tool
-
----
-
-## 实验 E3：公平 2 卡对比（2026-04-02，Qwen3-4B，2×910B3，8 轮）
-
-### 实验设计
-所有方案统一使用 2 张 910B3，公平对比：
-1. **Unified TP=2**：2 卡 tensor parallel，continuous batching，chunked prefill **OFF**（Ascend 默认）
-2. **Unified TP=2 + CP**：同上但 chunked prefill **ON**
-3. **Phased TP=2**：2 卡 tensor parallel，enable_pd_transfer，chunked prefill OFF
-4. **Disagg 1P1D**：1 卡 prefill + 1 卡 decode（来自实验 E2）
-
-### TPS 结果
-
-| Workload | Unified TP2 | Unified TP2+CP | Phased TP2 | Disagg 1P1D | CP vs Unified | Phased vs Unified | Disagg vs Unified |
-|---|---|---|---|---|---|---|---|
-| short_4req | 174.7 | 177.9 | 184.2 | 155.1 | +1.8% | +5.4% | **-11.2%** |
-| short_16req | 671.0 | 707.7 | 715.8 | 623.0 | +5.5% | +6.7% | **-7.2%** |
-| short_32req | 1206.6 | 1336.7 | 1249.7 | 1182.8 | **+10.8%** | +3.6% | -2.0% |
-| long_4req | 172.6 | 171.9 | 181.5 | 151.8 | -0.4% | +5.2% | **-12.1%** |
-| long_16req | 663.4 | 699.4 | 692.2 | 619.0 | +5.4% | +4.3% | **-6.7%** |
-| mixed_16req | 631.9 | 705.4 | 646.3 | 594.5 | **+11.6%** | +2.3% | -5.9% |
-
-### TTFT 结果 (ms)
-
-| Workload | Unified TP2 | Unified TP2+CP | Phased TP2 | Disagg 1P1D |
-|---|---|---|---|---|
-| short_4req | 14.1 | 14.4 | 12.9 | 17.9 |
-| short_16req | 10.4 | 3.0 | 3.1 | 4.2 |
-| short_32req | 8.8 | 1.7 | 1.8 | 2.5 |
-| long_4req | 15.2 | 16.3 | 11.5 | 15.8 |
-| long_16req | 12.0 | 5.6 | 6.3 | 6.8 |
-| mixed_16req | 6.4 | 5.9 | 6.5 | 6.5 |
-
-### TPOT 结果 (ms)
-
-| Workload | Unified TP2 | Unified TP2+CP | Phased TP2 | Disagg 1P1D |
-|---|---|---|---|---|
-| short_4req | 5.68 | 5.58 | 5.39 | 6.39 |
-| short_16req | 1.45 | 1.41 | 1.39 | 1.59 |
-| short_32req | 0.79 | 0.74 | 0.80 | 0.84 |
-| long_4req | 5.75 | 5.77 | 5.48 | 6.54 |
-| long_16req | 1.45 | 1.41 | 1.42 | 1.59 |
-| mixed_16req | 1.56 | 1.40 | 1.52 | 1.66 |
-
-### 关键发现
-
-1. **Chunked Prefill 显著提升混合/高并发场景**：Unified+CP 比 Unified 在 short_32req +10.8%、mixed_16req +11.6%，因为 CP 允许 prefill 和 decode 交错执行，减少 head-of-line blocking
-2. **Phased TP=2 全面优于 Unified TP=2（无 CP）**：所有 workload 均 +2.3%~+6.7%，说明在 2 卡 TP 下 P/D 分阶段有一致收益
-3. **Disagg 1P1D 全面劣于其他方案**：-2%~-12%，因为：
-   - 每张卡只用于单一阶段，decode 卡在 prefill 期间完全空闲（反之亦然）
-   - KV cache 跨卡传输开销（虽然同机走 HCCS 但仍有延迟）
-   - 小模型（4B）单卡即可高效处理，TP=2 的通信开销 < 分离的空闲开销
-4. **TTFT：CP/Phased 大幅优于 Unified（无 CP）**：高并发下 TTFT 从 8-10ms 降到 1.7-3ms
-5. **TPOT 差异小**：所有方案 TPOT 接近（decode 阶段行为相似），Disagg 略高 10-15%
-
-### 对 TDM 方案的启示
-- **Disagg 1P1D 不适合小模型/同机场景**：分离的资源浪费 > P/D 干扰的代价
-- **Chunked Prefill 是强 baseline**：TDM 需要在 CP 基础上论证额外收益，而非与无 CP 的 Unified 比
-- **TDM 的定位更清晰**：不是替代 PD 分离，而是在**单卡/TP 并行**场景下，通过智能的时分调度在 CP 基础上进一步优化
-- **大模型场景可能不同**：4B 模型计算量小，TP=2 通信占比高；大模型（如 70B+）的 PD 分离收益可能更明显
-
----
-
-## Core Code Paths
-- Scheduler: `vllm_ascend/core/scheduler.py`
-- Model Runner: `vllm_ascend/worker/model_runner_v1.py`
-- Attention: `vllm_ascend/attention/attention_v1.py`
-- ACL Graph: `vllm_ascend/compilation/acl_graph.py`
-- 上游 Scheduler: `vllm/v1/core/sched/scheduler.py`
-
-## ACL Graph 核心约束
-- 每种 batch size 需单独编译 graph（~1.4s/graph），总数有硬上限（MAX_CAPTURE_SIZE=1800）
-- 运行时必须精确匹配预编译 size，未命中 fallback eager mode 性能骤降
-- TDM 优势：P/D 分离后 shape 更可预测，graph 高度复用（vs chunked prefill 频繁切换）
-- 优化机会：Graph-Aware Batch Shaping — 调度器主动选择匹配已编译 graph 的 batch size
-
-### ACL Graph 主要作用于 Decode 阶段（源码分析，2026-04-02）
-
-**关键机制**：ACL Graph 的 pad/eager 判断基于 `total_num_scheduled_tokens`（一轮 iteration 中所有请求的 token 总数），而非请求数：
-- **Decode**：每个请求产出 1 token → `total_tokens = 并发请求数`（如 32 请求 = 32 tokens）→ 通常在 graph 范围内（≤512）
-- **Prefill**：处理完整 prompt → `total_tokens = 所有 prompt 长度之和`（如 4×500tok = 2000）→ 大概率超过 max_compiled_size(512) → eager fallback
-
-**源码证据**（`model_runner_v1.py:3488-3545`）：
-- 编译分两轮：第一轮 mixed mode（`uniform_decode=False`），第二轮专门为 decode 编译 FULL mode（`uniform_decode=True`）
-- Decode 有独立的 `decode_cudagraph_batch_sizes` 集合，体现了 decode 是 graph 的主要受益者
-
-**对 TDM 方案的修正**：
-- Graph-Aware Batch Shaping 的**主战场是 decode 阶段**的 padding 浪费优化
-- Prefill 阶段：长 prompt 走 eager，graph 约束不相关；仅当少量短 prompt（total_tokens ≤ 512）时 graph 才生效
-- 论文叙事应强调 "decode 阶段是主要受益者，prefill 在特定条件下也受益"，而非 "P/D 两阶段都需要 Graph-Aware"
-
-### ACL Graph 相关研究工作（2026-04-02）
-
-- **MuxWise**：使用 CUDA Graphs 但仅用于 decode 执行加速，未将其纳入调度决策
-- 其他 11 篇核心论文（DuetServe、Semi-PD、RAPID-Serve、Sarathi、PDM/Drift 等）均不讨论编译图对调度的影响
-- **"首次将编译器约束引入调度决策"是本方案的原创贡献**，无直接参考
-
----
-
----
-
-> **注：** 相关工作详细分析见 `paper_template.md`；Idea 方案完整版见 `idea_proposal.md`
-
----
-
-## Dilu 借鉴分析（2026-04-01）
-
-### Dilu → PD TDM 映射
-1. **Multi-factor Profiling → 离线 P/D 画像**：扫描 (batch_size, phase) 组合，记录延迟/AICore%/HBM_BW%/graph命中
-2. **互补调度 → P/D 互补**：P=compute-bound, D=memory-bound，TDM 让两种资源在时间维度上都不空闲
-3. **2D Co-scaling → 自适应**：快调 phase ratio（ms级）+ 慢调 KV cache 预算（需内存重分配）
-
-### NPU 实时利用率获取实测
-
-| 方案 | 延迟 | 结论 |
-|---|---|---|
-| npu-smi info -t usages | 秒级 | 太慢 |
-| acl.rt.get_device_utilization_rate() | ~250ms/call | 太慢 |
-| Ascend Profiler (torch_npu.profiler) | trace 模式 | 适合离线建表 |
-| **DCMI (libdcmi.so)** | **见下表** | **部分指标可用于在线内省** |
-
-**DCMI 各指标调用延迟实测（ctypes 调用 /usr/local/dcmi/libdcmi.so，需先 dcmi_init()）：**
-
-| 指标 | 延迟 | 可用 | 适合场景 |
-|---|---|---|---|
-| HBM BW | **~1.1ms** | OK | **每 iteration 可采样，D phase 带宽监测** |
-| AICPU | ~1.2ms | OK | 辅助 |
-| HBM Usage | ~3.8ms | OK | KV cache 监控 |
-| AICore | ~60ms | OK | 每 3-4 iter 采样，P phase 算力监测 |
-| VectorCore | ~62ms | OK | 低频采样 |
-| NPU Overall | ~62ms | OK | 低频采样 |
-
-### 方案：分层内省 + 离线画像
-
-**在线内省（DCMI）：**
-- HBM BW（1ms）：每 iteration 采样 → 实时监测 decode 带宽压力
-- AICore（60ms）：异步线程低频采样 → 周期性监测 prefill 算力利用率
-
-**离线画像（Ascend Profiler）：**
-- 算子级 AICore/HBM 带宽利用率采集
-- 建 (batch_size, phase) → (latency, util%) 画像表
-- 在线查表补充 DCMI 无法覆盖的细粒度信息
-
----
-
-## 安装备忘
-- torch/torch-npu 必须从华为镜像源安装：`pip install torch==2.7.1 torch-npu==2.7.1 --extra-index-url https://mirrors.huaweicloud.com/ascend/repos/pypi`
-- vllm: `VLLM_TARGET_DEVICE=empty pip install -e .`
-- vllm-ascend: `source set_env.sh && pip install -e . --no-build-isolation`
-- transformers < 5.0.0
-- 推理脚本需在 `if __name__ == '__main__':` 内
-
-## 实验 F：Graph-Aware Batch Shaping vs Naive Batching（2026-04-02，Qwen3-4B，单卡 910B3）
-
-### 实验设计
-- 核心问题：调度器主动对齐已编译 Graph shape 能带来多少收益？
-- 4 个子测试：padding 浪费全景、精确匹配 vs padding 吞吐对比、TDM 模拟场景、per-token 效率
-
-### Test 1: Padding 浪费全景分析
-
-| 场景 | 平均浪费 | 最坏浪费 | 精确匹配 | 低浪费(<10%)覆盖率 |
-|---|---|---|---|---|
-| prefill_typical (1-8) | **23.4%** | 62.5% | 3/8 | 38% |
-| prefill_burst (1-32) | **23.0%** | 62.5% | 5/32 | 28% |
-| decode_light (1-16) | **22.7%** | 62.5% | 4/16 | 31% |
-| decode_medium (1-64) | **16.5%** | 62.5% | 8/64 | 41% |
-| decode_heavy (1-128) | 11.0% | 62.5% | 14/128 | 62% |
-| all (1-512) | 4.3% | 62.5% | 48/512 | 90% |
-
-- **小 batch（prefill 场景）浪费最严重**：平均 23%，低浪费覆盖率仅 28-38%
-- 大 batch 区域已编译 shape 间距小（~8），浪费率自然降低
-
-### Test 2: 精确匹配 vs Padding 吞吐对比
-
-| 分类 | avg per-req TPS |
+| 用途 | 路径 |
 |---|---|
-| 精确匹配 | **42.4** |
-| 需 padding | **40.0** |
-| **精确匹配优势** | **+6.0%** |
+| AscendScheduler | `vllm-ascend/vllm_ascend/core/scheduler.py` |
+| AscendSchedulerConfig | `vllm-ascend/vllm_ascend/core/schedule_config.py` |
+| NPU Model Runner | `vllm-ascend/vllm_ascend/worker/model_runner_v1.py` |
+| Attention | `vllm-ascend/vllm_ascend/attention/attention_v1.py` |
+| ACL Graph 编译 | `vllm-ascend/vllm_ascend/compilation/acl_graph.py` |
+| 上游 Scheduler | `vllm/v1/core/sched/scheduler.py` |
+| **TDM 插件根** | `vllm-ascend/vllm_ascend/core/tdm/` |
+| TDM 注入键 | `additional_config.ascend_scheduler_config.scheduler_cls = "vllm_ascend.core.tdm.scheduler.TDMScheduler"` |
 
-- 精确匹配相比需 padding 的 batch，per-request 吞吐高 6%
-- padding 的代价不仅是浪费计算位置，还会拖慢整个 batch 的执行
+### 2.3 ACL Graph 关键约束
 
-### Test 3: TDM 模拟场景 Naive vs Graph-Aware
-
-| 场景 | Naive TPS | Graph-Aware TPS | Speedup | Waste 减少 |
-|---|---|---|---|---|
-| prefill_sparse (1-5) | 128.1 | 102.6 | **-19.9%** | 1.8 |
-| prefill_moderate (5-20) | 464.8 | 418.2 | **-10.0%** | 4.5 |
-| decode_growing (4→40) | 856.4 | 893.5 | **+4.3%** | 1.6 |
-| decode_stable (~32) | 1252.0 | 1260.2 | **+0.7%** | 2.5 |
-
-- **Graph-Aware 策略（向下取整）**：Naive batches 中 bs=3 → aware 选 bs=2（精确匹配），减少 padding 但处理更少请求
-- **Prefill 小 batch 场景反效果**（-10% ~ -20%）：向下取整减少每轮请求数，代价远大于 padding 浪费
-- **Decode 大 batch 场景有正收益**（+0.7% ~ +4.3%）：大 batch 区间 shape 间距小，向下取整损失少
-
-### Test 4: 同一 Graph Shape 下 Per-Token 效率
-
-| Graph Shape | 满载 per_req | 最低载 per_req | 效率差 |
-|---|---|---|---|
-| 8 | 40.3 | 42.0 | -4.2%（噪声） |
-| 16 | 46.7 | 39.2 | **+16.1%** |
-| 32 | 40.0 | 39.7 | +0.7% |
-| 64 | 38.1 | 29.7 | **+22.0%** |
-
-- 大 graph shape（64）下满载 vs 最低载效率差高达 **22%**
-- Padding 的真正代价：拖慢整个 batch 执行时间，而非仅仅浪费 padding 位置的算力
-
-### 核心发现与对 TDM 的启示
-
-1. **简单"向下取整"的 Graph-Aware 策略不可行**：小 batch 下减少请求数的代价 > padding 浪费的代价
-2. **正确的策略是"向上凑"而非"向下减"**：在队列中有足够请求时，主动凑到精确匹配 shape
-3. **TDM 的 Phase Switching 应感知 Graph shape**：不是"有请求就立刻 prefill"，而是"等凑够一个好 shape 再切到 prefill"
-4. **Layer 1 和 Layer 2 耦合设计的必要性被验证**：切换决策不能只看 SLO，还要考虑当前队列深度能否凑出好的 Graph shape
-5. **Decode 场景收益稳定但小**（+0.7% ~ +4.3%）：因为大 batch 区域 shape 间距已经很小（~8），padding 本身不严重
-6. **Prefill 场景是 Graph-Aware 的主战场**：shape 间距大（1→2→8→16），需要更智能的调度策略
+- 每种 batch size 单独编译 graph（~1.4s/graph），总数硬上限 `MAX_CAPTURE_SIZE=1800`
+- 运行时未命中 → fallback eager（per_token 延迟 +26%）
+- vllm-ascend 默认 48 种已编译 shape ∈ [1, 512]，间距 1→2→8→16→32→…
+- pad/eager 判断基于 `total_num_scheduled_tokens`（一 iter 全部 token 之和）：
+  - **Decode**：每 req 1 token → total = 并发数 → 通常 ≤ 512 → graph 命中
+  - **Prefill**：长 prompt → total = Σ prompt 长度 → 大概率 > 512 → eager
+- ACL Graph 主战场是 **decode 阶段的 padding 浪费优化**（源码：`model_runner_v1.py:3488-3545`，decode 有独立 `decode_cudagraph_batch_sizes`）
 
 ---
 
-## TDM 概念澄清（2026-04-02，讨论后修正）
+## 3. 实验事实速查（早期可行性论据）
 
-### 核心修正：TDM 不是逐 iteration 的 P/D 二选一
+> Qwen3-4B + 单/双 910B3。详细数字保留在 git 历史的旧 notes.md，下面是结论。
 
-**旧理解**（有误）：每个 iteration 独立决定 P 还是 D，基于 SLO slack reactive 切换。
+### 3.1 P/D 资源画像（Exp B）
+- Prefill = **compute-bound**（AICore 69.8%，HBM BW 15.8%）
+- Decode = **memory-bandwidth-bound**（AICore 42.6%，HBM BW 25.1%）
+- → P/D 在硬件上互补，时分复用有理论收益
 
-**新理解**：TDM 是在**滑动时间窗口内控制 P:D:M 三种模式的执行比例**。核心控制变量是 prefill 插入率 r_p，不是每次的二选一决策。
+### 3.2 ACL Graph padding 浪费（Exp A/F）
+- Prefill 小 batch（1-8）平均 23.4% 浪费；decode 中等 batch 16.5%
+- 简单"向下取整"凑 graph shape **不可行**（小 batch 下减请求代价 > padding 代价）
+- 正确策略是**"向上凑"**：队列足够时主动凑到精确匹配 shape
 
-### 三种执行模式（动作空间扩展为 {P, D, Mixed}）
+### 3.3 在线利用率采集（DCMI 实测）
+- **HBM BW 1.1ms / AICore 60ms** 单次调用延迟
+- HBM BW 后台采样恒定 7-9% 开销（来自 GIL/driver 锁，与频率无关）
+- AICore 100ms 采样 ~0% 开销
+- 推荐：在线 AICore 100ms + 离线画像表覆盖 HBM BW
 
-| 模式 | 行为 | 适用场景 |
+### 3.4 拓扑对比（Exp E3，Qwen3-4B 2×910B3）
+- Disagg 1P1D **全面输 -2%~-12%**（小模型同机场景，TP=2 通信开销 < 分离的空闲开销）
+- Chunked Prefill 在高并发提升 +10.8%~+11.6%（在 GPU/小模型上 SOTA 验证）
+- → C4 PD-disagg 在我们 setup 不是真实威胁；C3 才是
+
+---
+
+## 4. TDM 概念定稿（2026-04-02）
+
+### 4.1 不是逐 iter 二选一
+TDM = 在**滑动时间窗口内控制 P:D:M 三种模式的执行比例**。控制变量是 prefill 插入率 `r_p`，不是每次硬切。
+
+### 4.2 三种执行模式（V2 完整动作空间）
+| 模式 | 行为 | 适用 |
 |---|---|---|
-| PREFILL | 纯 prefill iteration | 队列深、decode 空闲、低并发 |
-| DECODE | 纯 decode iteration | TPOT 紧张、无新请求 |
-| MIXED | Chunked Prefill（P+D 混合 batch） | 高并发、负载平稳 |
+| PREFILL | 纯 prefill iter | 队列深、decode 空闲 |
+| DECODE | 纯 decode iter | TPOT 紧、无新请求 |
+| MIXED | Chunked Prefill (P+D 同 batch) | 高并发、负载平稳 |
 
-**关键结论**：
-- **CP 是 TDM 的特例**（全部 iteration 选 MIXED）→ TDM 是 CP 的超集
-- **实验 E 验证了动态选择的必要性**：低并发 Phased +10%，高并发 Phased -20%
-- **不是"分离一定好"或"混合一定好"**，而是根据负载动态选择
+**CP 是 TDM 的特例**（全 iter 选 MIXED）→ TDM 是 CP 的超集。
 
-### Starvation 问题与解决
-
-V1 SLO-reactive 切换的问题：
-- 等 SLO 快违约才切换 → 震荡和滞后
-- 极端情况可能饿死 prefill 或 decode
-
-V2 AIMD 解决方式：
-- 维护 prefill 插入率 r_p（平滑变化，不是逐次决策）
-- r_p 有下界（防 prefill 饿死）、连续 decode 有上界（防 decode 饿死）
-- TPOT violation → MD（大幅降频），TPOT 达标 → AI（逐步升频）
-- 高并发自动切 MIXED 模式
-
-### Iteration-level vs Batch-level 的关系
-
-两个"level"是同一粒度的两个维度：
-- **1 iteration = 1 batch = 1 ACL Graph replay**（等价关系）
-- **Iteration-level TDM**（Layer 1）：决定这个 iteration 做什么模式 → 时间维度
-- **Batch-level Graph**（Layer 2）：决定这个 iteration 装多少请求 → 容量维度
-- 串行决策：Layer 1 先决定模式，Layer 2 再决定大小，Layer 2 可反馈 Layer 1 建议延迟
+### 4.3 Iteration-level vs Window-level
+- 1 iteration = 1 batch = 1 ACL Graph replay（等价）
+- **iter 维度（Layer 1）**：本 iter 走什么模式 → 时间维度
+- **window 维度（Layer 2）**：未来 N iter 的 P:D 比例 target → 长程规划
+- 串行决策：window 决定 ratio → iter 按 ratio + 即时状态选 phase
 
 ---
 
-## Pending Questions
-- ChunkedPrefill 在 NPU 上的支持程度？
-- NPU 单卡 P/D 的详细 profiling 数据（用 Ascend Profiler 采集）
-- Mixed 模式在当前 AscendScheduler 中的可行性验证
+## 5. TDM 插件代码架构
+
+### 5.1 文件布局
+
+```
+vllm-ascend/vllm_ascend/core/tdm/
+├── __init__.py                 导出 TDMScheduler, TDMConfig
+├── scheduler.py                TDMScheduler（继承 AscendScheduler，注入入口）
+├── config.py                   TDMConfig（所有超参 + 校验）
+├── controller.py               StaticRatioController + SLOReactiveController + make_controller
+├── selector.py                 TokenBucketSelector（peek/commit 两阶段）
+├── engine.py                   PhaseEngine（执行 phase 切换）
+├── constraints.py              HardConstraints（min/max_slice_iters）
+├── boundary.py                 BoundaryGuard（KV pressure freeze）
+├── monitor.py                  QueueMonitor（QueueSnapshot 采集）
+├── tracker.py                  RequestTracker（passive per-req TTFT/TPOT）
+├── telemetry.py                Telemetry（hot ring + cold JSONL）
+├── timing.py                   TimeAccountant
+├── types.py                    QueueSnapshot / RequestRecord / PhaseDecision
+└── tests/                      单测 60/60 全过
+    └── _runner.py              `python3 -m vllm_ascend.core.tdm.tests._runner`
+```
+
+### 5.2 Option W（零上游改动）
+`AscendScheduler.schedule()` L103-104 的 "waiting+running 都空 → 切 decode" 自动翻 phase 用作"物理兜底"，TDM 以 peek/commit 模式观察实际执行 phase 后 reconcile 计数。
+
+### 5.3 schedule() 调用时序
+
+```
+schedule():
+  snap = monitor.snapshot()
+  ratio = controller.get_target_ratio(snap, iter_id)         ← L3 慢变量（每 update_interval iter）
+  planned = selector.peek(phase, phase_iters, ratio, snap)    ← L3 快变量
+  after_c = constraints.enforce(planned, ...)
+  candidate = boundary.override(after_c, snap)
+  engine.apply(candidate)                                     ← 设 self.phase
+  out = super().schedule()                                    ← 父类可能自动翻 phase
+  actual = self.phase
+  selector.commit(actual)                                     ← 按实际消耗 token
+  engine.reconcile(actual, candidate)
+  telemetry.record_iter(...)
+  return out
+```
+
+### 5.4 共享数据契约
+
+```python
+@dataclass(frozen=True)
+class QueueSnapshot:
+    waiting_depth: int
+    waiting_oldest_age_ms: float
+    finished_prefill_depth: int
+    running_depth: int
+    kv_free_blocks: int
+    kv_total_blocks: int
+    @property
+    def kv_free_ratio(self) -> float: ...
+
+@dataclass(frozen=True)
+class PhaseDecision:
+    phase: Literal["prefill", "decode"]
+    source: Literal["controller", "constraint_min/max_slice",
+                    "boundary_kv_pressure", "parent_auto_flip", "fallback"]
+    target_ratio: float
+
+@dataclass
+class RequestRecord:
+    request_id, prompt_tokens, output_tokens
+    admission_ts_ms, first_token_ts_ms, finish_ts_ms
+    decode_intervals_ms: list[float]
+    @property ttft_ms / tpot_ms_mean / tpot_ms_p99
+```
+
+### 5.5 消融开关矩阵
+
+| 方案 | enable_tdm | controller_kind | 说明 |
+|---|---|---|---|
+| Baseline (C1) | False (passive_tracker=True) | — | AscendScheduler 原版 + tracker |
+| TDM static (M1=C2) | True | static | 固定 ratio=0.30 |
+| TDM SLO-PID (M2) | True | slo_pid | + SLO 自适应 |
 
 ---
 
-## AscendScheduler 源码精读（2026-04-22，为 V1 原型做准备）
+## 6. 实验 driver 架构
 
-文件位置：`vllm-ascend/vllm_ascend/core/scheduler.py`（587 行）、`schedule_config.py`（108 行）、`worker/model_runner_v1.py::_build_attn_state`（1576 行）
-
-### 1. 现有 schedule() 流程（587 行）
+### 6.1 文件布局
 
 ```
-AscendScheduler.schedule():
-  ├─ L64-66  如果 chunked_prefill_enabled → 直接委托 super().schedule()（走上游 V1 统一调度）
-  ├─ L93-104 如果 self.phase == "prefill"：
-  │    ├─ 把 num_tokens > num_prompt_tokens 的 running 请求移到 finished_prefill_reqs
-  │    └─ 若 waiting/running 都空 → phase 翻到 "decode"
-  ├─ L114-304 第一轮循环：从 waiting 取请求做 prefill
-  │    ├─ L129 跳过 WAITING_FOR_REMOTE_KVS（disagg P→D 传输中）
-  │    ├─ L137-144 LoRA max_loras 约束
-  │    ├─ L149-170 算 num_computed_tokens（本地 + 远端）
-  │    ├─ L181-207 prompt_limit / token_budget 检查
-  │    ├─ L222-227 watermark 检查（_check_watermark_for_prefill）
-  │    ├─ L229-232 long_prefill_token_threshold 跳过
-  │    └─ L263-301 放入 running，记 scheduled_req_ids，分配 KV blocks
-  ├─ L306-311 phase == "decode" → 从 finished_prefill_reqs 补入 running
-  ├─ L313-426 第二轮循环：len(scheduled_req_ids) == 0 才进来（即当前 step 没挑到 prefill）
-  │    └─ 从 running 挑 decode：每个请求 num_new_tokens=1（spec decoding 例外）
-  └─ L447-505 组 SchedulerOutput，advance num_computed_tokens
+Ascend-PD-TDM/experiments/
+├── lib/
+│   ├── workload.py        # WorkloadSource ABC + SyntheticPoisson；扩展点 AzureTraceReplay
+│   └── metrics.py         # tracker JSONL 读 + 精确 ID join + 窗口聚合 + Goodput
+├── qps_sweep.py           # 单点 driver（httpx + asyncio + tracker join）
+├── run_qps_sweep_all.py   # 编排（一 config 一 server，QPS 列表共享）
+├── compare_c1_c2_c3.py    # 多方对照图（支持 --c12 --c3 --c4 --m2..--m27）
+├── plot_qps_sweep.py      # 单 sweep 4 子图（system python3）
+└── plot_m2_diag.py        # ratio over time 诊断图
 ```
 
-**核心观察**：
-- "prefill-first" 策略：一个 step 要么全 P 要么全 D，不会混合（CP 除外 — 那是委托给上游的）
-- `self.phase` 是 `""`/`"prefill"`/`"decode"` 三态，只在 `enable_pd_transfer=True` 时激活，**面向多卡 disagg**
-- `_check_watermark_for_prefill` 只在 prefill 分支做 KV 水位检查
-- L315 `len(self.scheduled_req_ids) == 0` 的门禁：**同一 step 内 prefill 和 decode 互斥**（非 CP 路径下）
+### 6.2 关键基础设施约定
 
-### 2. _build_attn_state 的 P/D 判定（model_runner_v1.py:1576-1600）
+- **passive_tracker 模式**：baseline / 各对照配置都走 TDMScheduler 但 `enable_tdm=False, passive_tracker=True`，仅跑 tracker → C1/C2/C3/C4 测量口径完全一致
+- **Goodput 定义**：`status==200 ∧ ttft_ms<SLO_ttft ∧ tpot_ms_mean<SLO_tpot` 的 output_tokens 总和 / 稳态窗口
+- **精确 ID 匹配**：tracker `cmpl-xxx-0` ↔ driver `cmpl-xxx`，`_strip_sample_suffix` 去末尾索引
+- **SLO 默认**：TTFT < 500ms，TPOT < 50ms
 
-决策来自**实际调度 token 数**，不来自 scheduler 的 phase 字段：
+### 6.3 Config 矩阵（`build_additional_config`）
 
-```
-if all(num_scheduled_tokens == seq_lens): → PrefillNoCache  # 纯 prefill 首次
-elif all(num_scheduled_tokens == 1):       → DecodeOnly      # 纯 decode
-elif spec decoding 条件:                    → SpecDecoding
-elif CP 开启 / ascend scheduler 关闭:       → ChunkedPrefill   # 混合
-else:                                       → PrefillCacheHit  # prefill 但命中了前缀
-```
-
-**结论**：如果我们在 scheduler 里把一个 batch 构造成"全 P/全 D/混合"，attn_state 会被自动推断出来，**不需要改 model_runner**。
-
-### 3. Config 扩展点（schedule_config.py）
-
-AscendSchedulerConfig（dataclass）目前有：
-- `enable_chunked_prefill`, `max_long_partial_prefills`, `long_prefill_token_threshold`
-- `enable_pd_transfer`, `decode_max_num_seqs`
-- `policy`, `scheduler_cls`
-
-扩展字段（V1 需要新增）：
-```python
-enable_tdm: bool = False
-tdm_ttft_slo_ms: float = 100.0
-tdm_tpot_slo_ms: float = 50.0
-tdm_max_consecutive_p: int = 4    # 防 decode 饿死
-tdm_max_consecutive_d: int = 20   # 防 prefill 饿死
-tdm_high_concurrency_threshold: int = 32   # R > 阈值 → MIXED
-```
+| 配置 | 关键设置 |
+|---|---|
+| `c1_baseline` | `enable_tdm=False, passive_tracker=True` |
+| `c2_tdm` (M1) | `enable_tdm=True, static_ratio=0.3, controller_kind=static` |
+| `c2_tdm_m2` ~ `c2_tdm_m27` | M2.x 各变体（见 §8） |
+| `c3_cp` | vLLM 默认 chunked prefill |
+| `c4_pd` | PD-disagg 1P1D + ranktable + driver `--stream` 拿 client-side metric |
 
 ---
 
-## Phase Switching V1 原型切入点设计（Day 5 实现的直接指导）
+## 7. 论文对照矩阵 + 关键发现
 
-### 最小改动面
+### 7.1 四方对照
 
-**不需要改的部分**：上游 Scheduler、model_runner、acl_graph、attention_v1 — 全都通过"scheduler 组出的 batch 组成"被动接收 attn_state。
+| # | 配置 | scheduler | 角色 |
+|---|---|---|---|
+| **C1** | hybrid | `AscendScheduler` (phase="") | sanity baseline / 参考线 |
+| **C2** (M1) | TDM static | `TDMScheduler` static_ratio=0.3 | ablation 起点 |
+| **C3** | Chunked Prefill | vLLM 默认 (AscendScheduler 短路退回) | **真正 SOTA on-device 主对比** |
+| **C4** | PD disagg 1P1D | 双 server + proxy + LLMDataDist KV connector | 架构竞品 |
 
-**只需要改**：
-1. `schedule_config.py` — 加 6 个字段（见上）
-2. `scheduler.py` — 新增 `_schedule_tdm()` 方法 + 在 `schedule()` 入口分派
-3. `scheduler.py` — 在 `update_from_output()` 里记录 decode 请求最近产出 token 的时间戳，供 TPOT slack 计算
+### 7.2 模块化 ablation
 
-### schedule() 分派改动
-
-```python
-def schedule(self) -> SchedulerOutput:
-    # 新增分派
-    if getattr(self.scheduler_config, 'enable_tdm', False):
-        return self._schedule_tdm()
-    # 原逻辑保留
-    if self.scheduler_config.chunked_prefill_enabled:
-        return super().schedule()
-    # ... 原 phase=prefill/decode 分支
+```
+M0  hybrid (C1 vanilla)              ← sanity
+M1  basic TDM (C2)                   ← 切片本身（已实现）
+M2  + SLO-adaptive ratio             ← PID + 各种 guard（已实现，未达预期）
+M3  + graph-aware + prefill chunking ← 见 §1.1-1.2（待实现）
+M4  + 监控反馈闭环                     ← 在线（基础设施部分就绪）
 ```
 
-### _schedule_tdm 骨架
+### 7.3 8K canonical regime 数据（论文核心）
 
-```python
-def _schedule_tdm(self) -> SchedulerOutput:
-    # Step 1: 采集状态
-    Q = len(self.waiting)
-    R = len(self.running)
-    now = time.monotonic()
-    ttft_slack = self._compute_ttft_slack(self.waiting, now)
-    tpot_slack = self._compute_tpot_slack(self.running, now)
-
-    # Step 2: V1 优先级规则（与 idea_proposal §2.3 对齐）
-    cfg = self.scheduler_config
-    T_tpot = cfg.tdm_tpot_slo_ms * 1e-3
-    T_ttft = cfg.tdm_ttft_slo_ms * 1e-3
-
-    if tpot_slack < T_tpot * 0.3:                       # 紧急保 TPOT
-        phase = "DECODE"
-    elif Q > 0 and ttft_slack < T_ttft * 0.3:           # 紧急保 TTFT
-        phase = "PREFILL"
-    elif self.consecutive_d >= cfg.tdm_max_consecutive_d:  # 防 prefill 饿死
-        phase = "PREFILL"
-    elif self.consecutive_p >= cfg.tdm_max_consecutive_p:  # 防 decode 饿死
-        phase = "DECODE"
-    elif Q > 0 and R == 0:
-        phase = "PREFILL"
-    elif Q == 0:
-        phase = "DECODE"
-    elif R > cfg.tdm_high_concurrency_threshold and Q > 0:
-        phase = "MIXED"
-    else:
-        phase = "DECODE"   # 默认保守（TPOT 敏感）
-
-    # Step 3: 按 phase 组 batch
-    if phase == "PREFILL":
-        self.consecutive_p += 1; self.consecutive_d = 0
-        return self._schedule_prefill_only()   # 复用现有 L114-304 逻辑
-    elif phase == "DECODE":
-        self.consecutive_d += 1; self.consecutive_p = 0
-        return self._schedule_decode_only()    # 复用现有 L313-426 逻辑
-    else:  # MIXED
-        self.consecutive_p = 0; self.consecutive_d = 0
-        return super().schedule()              # 直接委托 CP 路径
+```
+budget        max_model_len = max_num_batched_tokens = 8192
+sweep         duration=60s warmup=20s
+QPS           收敛到 {16, 32}（R2 / R3 endpoint）
+SLO           ttft_p99<500ms ∧ tpot_p99<50ms
+硬件天花板     tpot p99 ≈ 57ms ⇒ 50ms SLO 物理不可达，是 M2 困局根源
 ```
 
-### TTFT/TPOT slack 计算
+| qps | regime | C1 gp | M1 gp | M2 gp | C3 gp | C1 SLO% | M1 SLO% | M2 SLO% | C3 SLO% |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 8  | R1 | 1519 | 1513 | 1508 | 1189 | 98.6 | 96.8 | 95.7 | 72.3 |
+| 16 | R2 | **1906** | 1624 | **1823** | 1508 | **65.0** | 53.5 | 61.3 | 50.8 |
+| 24 | R2 | **3104** | 2621 | 2913 | 2668 | **70.8** | 61.8 | 67.8 | 61.7 |
+| 32 | R3 | 4681 | 4331 | 4146 | 3762 | **78.8** | 72.6 | 70.3 | 63.9 |
 
-- **TTFT slack**：`request.arrival_time`（vLLM V1 Request 已有）+ SLO - now
-  - 取 waiting queue 里最紧迫请求的 slack
-- **TPOT slack**：需要记录每个 running 请求的最近一次产出 token 的时间戳
-  - 在 `update_from_output()` 里维护 `self.last_token_time: dict[req_id, float]`
-  - TPOT slack = min over running: SLO - (now - last_token_time[req_id])
+**核心 finding**：
+1. C1 hybrid 在 8K canonical 全谱占优，TDM 仅在 R3 ttft_p99 维度赢（116 vs 215ms, -46%）
+2. C3 chunked prefill 全谱输 C1（业界 SOTA，但在我们 setup 反常）—— **待核查 vllm-ascend CP 实现**
+3. **裸 TDM 输 hybrid 不是设计错，是「单纯切片 ≠ 完整系统价值」** —— 这是 ablation M1 起点
 
-### 饿死计数器维护
+### 7.4 Regime 反转
+- **2K regime**（紧 budget）：qps=16 c2 ttft 比 c1 好 21% → TDM 占优
+- **8K regime**（松 budget）：qps=16 c1 ttft 比 c2 好 42% → hybrid 占优
+- 解释：紧 budget → slot 稀缺 → 时分调度有用；松 budget → hybrid 自由打包更高效
 
-两个计数器 `self.consecutive_p / consecutive_d` 只在 `_schedule_tdm()` 里更新；非 TDM 路径不动。
+---
 
-### CLI 开关
+## 8. M2 SLO-adaptive 实验（2026-05-02 ~ 2026-05-06）
 
-vllm-ascend 的 AscendSchedulerConfig 是通过 `--additional-config` json 传入的，加字段后即可：
+### 8.1 M2 系列变体
+
+每个变体 = PID-lite controller + 一个新机制。所有用 `controller_kind=slo_pid`。
+
+| 版本 | config | 新增机制 | 关键参数 |
+|---|---|---|---|
+| **M2** | `c2_tdm_m2` | 纯 PID-lite | `kp=0.5, ema_alpha=0.3, deadband=0.02` |
+| **M2.1** | `c2_tdm_m21` | + starvation guard | `starvation_min_ticks=3` |
+| **M2.2** | `c2_tdm_m22` | + hysteresis release | `release_margin=0.10` |
+| **M2.3** | `c2_tdm_m23` | + backlog 加和 | `kp_q=0.5, backlog_target=0.5` |
+| **M2.4** | `c2_tdm_m24` | + tpot 饱和检测 | `saturation_min_ticks=5` |
+| **M2.5** | `c2_tdm_m25` | + ReLU err clip | `relu_err=True` |
+| **M2.6** | `c2_tdm_m26` | M2.5 + saturation_min_ticks=1 | 立即锁饱和 |
+| **M2.7** | `c2_tdm_m27` | M2.5 + saturation_min_ticks=2 | 2 tick 锁饱和 |
+
+### 8.2 各机制效果
+
+| 机制 | 设计初衷 | 实测效果 |
+|---|---|---|
+| starvation guard | ratio 撞底关 err_tpot 让 ttft 救场 | 没用，guard 释放后立刻拉回 floor |
+| hysteresis release | 解振荡 | 没用，振荡不是主因 |
+| backlog-aware | "队首 age / SLO budget" 当 leading indicator | 没用，oldest_age 90% 时间 = 0 |
+| tpot 饱和检测 | tpot 物理不可达时屏蔽 err_tpot | 部分有用，但激活前 ratio 已被推到底 |
+| ReLU err clip | 满足的 SLO 不该反推 ratio（修 err 公式） | 关键修复 |
+| saturation_min_ticks=1 | 立即锁 saturation | 锁住 0.30，但 R3 反差 |
+
+### 8.3 综合排名（R2 + R3 SLO% 几何均值）
+
+| 方案 | R2 SLO% | R3 SLO% | geomean | 备注 |
+|---|---:|---:|---:|---|
+| C1 hybrid | 65.0 | 78.8 | **71.6** | 全局最优（参考线） |
+| **M2.7** | 62.6 | 70.1 | **66.2** ⭐ | M 家族综合最优 |
+| M2 | 61.3 | 70.3 | 65.6 | 纯 PID 居然次优 |
+| M2.3 | 55.9 | 71.9 | 63.4 | |
+| M2.5 | 53.5 | 74.5 | 63.1 | R3 单点最优 |
+| M1 (static) | 53.5 | 72.6 | 62.3 | |
+| C3 chunked | 50.8 | 63.9 | 57.0 | 全谱负向 |
+
+### 8.4 关键 finding：regime-dependent 最优 ratio
+
+| Regime | 实测最优 ratio | 数据点 |
+|---|---|---|
+| R2 (qps=16) | ≈ 0.27 | M2.7 锁 0.27 → 62.6（M2.6 锁 0.30 → 49.8） |
+| R3 (qps=32) | ≈ 0.05 (floor) | M2.5 ratio 在 floor 97.8% → 74.5 |
+
+**含义**：单一全局最优 ratio 不存在 → 真正的 adaptive 必须 regime-aware → motivate M3。
+
+### 8.5 PID 控制器超参（`SLOReactiveController` 完整接口）
+
+| 参数 | TDMConfig 字段 | 默认 | 含义 |
+|---|---|---:|---|
+| `kp` | `slo_pid_kp` | 0.5 | `delta = kp × (err_ttft - err_tpot)` |
+| `ema_alpha` | `slo_pid_ema_alpha` | 0.3 | EMA 平滑 |
+| `deadband` | `slo_pid_deadband` | 0.02 | 误差死区 |
+| `min_samples` | `slo_pid_min_samples` | 16 | 冷启动门槛 |
+| `window_size` | `window_size` | 128 | 滑窗大小 |
+| `update_interval` | `controller_update_interval` | 8 | 每 N iter 重算 |
+| `target_violation_rate` | `slo_target_violation_rate` | 0.05 | 允许 5% 违例 |
+| `initial_ratio` | `static_ratio` | 0.30 | 冷启动 |
+| `ratio_min/max` | `slo_ratio_min/max` | 0.05/0.80 | clip 范围 |
+| `slo_ttft_ms / slo_tpot_ms` | 同名 | 500/50 | SLO 阈值 |
+| `slo_starvation_min_ticks` | M2.1 | 3 | 撞底 N tick 进 guard |
+| `slo_starvation_release_margin` | M2.2 | 0.10 | guard 释放门槛 |
+| `slo_pid_kp_q` | M2.3 | 0.5 | backlog 加和系数 |
+| `slo_pid_backlog_target` | M2.3 | 0.5 | backlog 中性点 |
+| `slo_tpot_saturation_enabled` | M2.4 | True | 饱和检测开关 |
+| `slo_tpot_saturation_min_ticks` | M2.4 | 5 | 进入饱和 |
+| `slo_tpot_saturation_release_ticks` | M2.4 | 5 | 释放饱和 |
+| `slo_pid_relu_err` | M2.5 | True | err ReLU 截断 |
+
+---
+
+## 9. 复现实验
+
+### 9.1 数据落盘位置
+
 ```
---additional-config '{"ascend_scheduler_config": {"enabled": true, "enable_tdm": true, "tdm_ttft_slo_ms": 100, "tdm_tpot_slo_ms": 50}}'
+Ascend-PD-TDM/results/
+├── qps_sweep_8k/              C1 + C2 (M1) 8K canonical
+├── qps_sweep_8k_c3/           C3 chunked prefill 8K
+├── qps_sweep_2k_y/            2K Y plan C1+C2+C3
+├── qps_sweep_2k_y_c4/         2K Y plan C4 PD-disagg
+├── m2_slo_adaptive/           M2 sweep + diag 图
+├── m2{1..5}_slo_adaptive/     M2.1-M2.5
+├── m26_m27_slo_adaptive/      M2.6 + M2.7（同 sweep）
+└── tdm_trace/                 passive tracker JSONL（每 config 一对 req+iter）
 ```
 
-### 潜在坑点
+### 9.2 跑 sweep（vllm 的 python，必须从 /tmp 启）
 
-1. **L65-66 CP 入口**：如果 `chunked_prefill_enabled=True` 就直接走 super，我们 TDM 的 MIXED 分支复用这个路径是 OK 的，但要确保 `enable_tdm` 和 `chunked_prefill_enabled` 不冲突（建议 TDM 模式下内部允许 CP 路径，但对外只暴露 `--enable-tdm`）。
-2. **L315 互斥门禁**：我们的 PREFILL/DECODE 分支各复用一块，不能让它们"本 step 没挑到 prefill 就混去挑 decode"。需要把原逻辑拆成独立方法而不是共用一个 schedule()。
-3. **防饿死上限需要按 SLO 反推**：如 TPOT SLO=50ms、iteration ~20ms，则 `max_consecutive_p ≤ 2` 才能保 decode 不违约；需要实验校准。
-4. **MIXED 路径的饿死**：super().schedule() 走 CP 后 consecutive 计数器清零，但 CP 本身没区分 P/D，要看实验数据是否需要额外保护。
+```bash
+cd /vllm-workspace/Ascend-PD-TDM/experiments
 
-### 下一步（Day 5）
+# 单变体（例：M2.7 R2/R3 endpoint）
+/usr/local/python3.11.13/bin/python3 run_qps_sweep_all.py \
+  --configs c2_tdm_m27 \
+  --qps 16,32 --duration 60 --warmup 20 \
+  --max-model-len 8192 --max-num-batched-tokens 8192 \
+  --outdir /vllm-workspace/Ascend-PD-TDM/results/m27_slo_adaptive
 
-- 先写 `_schedule_prefill_only()` 和 `_schedule_decode_only()`：把现有 L114-304、L306-426 机械摘出成独立方法（不改语义）
-- 再写 `_schedule_tdm()` + `_compute_ttft_slack / _compute_tpot_slack`
-- 加 config 字段 + unit test：(a) 无请求时不崩；(b) 纯 Q>0 → PREFILL；(c) 连续 D 到上限强制切 P
+# 全 M 家族（~1.5h）
+python run_qps_sweep_all.py \
+  --configs c2_tdm_m2,c2_tdm_m21,c2_tdm_m22,c2_tdm_m23,c2_tdm_m24,c2_tdm_m25,c2_tdm_m26,c2_tdm_m27 \
+  --qps 16,32 --duration 60 --warmup 20 \
+  --max-model-len 8192 --max-num-batched-tokens 8192 \
+  --outdir /vllm-workspace/Ascend-PD-TDM/results/m2_full_family
 
-## 导师讨论纪要 — 2026-04-08
+# baseline（C1+C2 / C3 / C4）
+python run_qps_sweep_all.py --configs c1_baseline,c2_tdm \
+  --qps 16,32 --duration 60 --warmup 20 \
+  --max-model-len 8192 --max-num-batched-tokens 8192 \
+  --outdir /vllm-workspace/Ascend-PD-TDM/results/qps_sweep_8k
+# C3: --configs c3_cp，C4: --configs c4_pd（自动加 --stream）
+```
 
-继 2026-04-03 首轮汇报后的反馈：
+`--configs` 可选：`c1_baseline, c2_tdm, c2_tdm_m2..c2_tdm_m27, c3_cp, c4_pd`。
 
-1. **模型选型**：主测模型改用 **Qwen3-7B**（不是 4B 也不是 30B+）。理由：7B 已能体现 P/D 互补效应，又在 910B3×2 的硬件预算内可行。
-2. **不必过度追求大模型与真实负载**：现阶段重点是把 TDM 机制跑通、把"vs Unified+CP"的增量收益讲清楚；30B+ 模型和真实生产 trace 留作后期补充实验，不作为当前阻塞项。这意味着原 idea_proposal/meeting_outline 里"小模型只是验证可行性，大模型才是收益场景"的叙事需要弱化。
-3. **相关工作对比缺失（最主要的批评）**：原 meeting_outline 只比较了"算子级 vs iteration 级"两条技术路线，**没有系统性对比已有的单卡 PD 混部 / 时分复用工作**。导师明确要求下次汇报必须能回答："和 Sarathi-Serve / DistServe / Semi-PD / DuetServe / MuxWise / RAPID-Serve / PDM/Drift / Dilu 的差异在哪？为什么这些工作不能搬到 NPU？" 已在 meeting_outline.md 新增 §五"相关工作对比"，内容来自 idea_proposal.md §1.2 + tdm_related_work.md 七维表的浓缩。
-4. **后续动作**：(a) 切换 Qwen3-7B 重跑 Exp B/D/E；(b) 把相关工作对比整理成幻灯片级表格融入下次汇报；(c) 精读 PDM/Drift 强化对比。
+### 9.3 出综合对比图（system python3，要 matplotlib）
+
+```bash
+/usr/bin/python3 compare_c1_c2_c3.py \
+  --c12 .../qps_sweep_8k/qps_sweep_summary.json \
+  --c3  .../qps_sweep_8k_c3/qps_sweep_summary.json \
+  --m2  .../m2_slo_adaptive/qps_sweep_summary.json \
+  --m21 .../m21_slo_adaptive/qps_sweep_summary.json \
+  ...
+  --m27 .../m26_m27_slo_adaptive/qps_sweep_summary.json \
+  --outdir <out> --out-name compare.png \
+  --title-prefix "8K canonical: full M-family"
+```
+
+CLI: `--c12 --c3 --c4 --m2..--m27`，每个 arg 接一个 sweep summary JSON。
+
+### 9.4 单测（不依赖 NPU）
+
+```bash
+cd /tmp && /usr/local/python3.11.13/bin/python3 -m vllm_ascend.core.tdm.tests._runner
+# 60 个 controller + scheduler 测试，~5s
+```
+
+### 9.5 ratio 轨迹诊断
+
+```bash
+/usr/bin/python3 -c "
+import json, statistics
+from collections import Counter
+path = '<sweep>/tdm_trace/qps_sweep_<config>_iter.jsonl'
+ratios=[]; phases=[]
+for line in open(path):
+    rec = json.loads(line)
+    if 'target_ratio' in rec: ratios.append(rec['target_ratio'])
+    if 'phase' in rec: phases.append(rec['phase'])
+print(f'iters={len(ratios)} ratio min={min(ratios):.3f} max={max(ratios):.3f} mean={statistics.mean(ratios):.3f}')
+print(f'phases: {dict(Counter(phases))}')
+"
+```
+
+### 9.6 环境陷阱（必读）
+
+| 陷阱 | 解决 |
+|---|---|
+| 从 `/vllm-workspace` 启 vllm 撞 namespace（`vllm.__file__=None`） | server / driver 必须 `cd /tmp` 启（编排脚本已自动） |
+| 本机 `http_proxy=localhost:7890` 不可改 | curl `--noproxy '*'`，httpx `trust_env=False` |
+| vLLM V1 `RequestOutput.metrics=None` | 用 TDM passive_tracker；C3/C4 加 driver `--stream` SSE 时间戳 fallback |
+| httpx 默认连接池 `max_connections=256, pool_timeout=10s` 在 qps≥32 滚雪球 | 已修：`max_connections=2048, pool_timeout=300s` |
+| C4 PD-disagg `LLM_LINK_FAILED` | ranktable.json 给两 NPU 不同占位 IP（10.0.0.1/10.0.0.2），HCCS 物理直连不查真实 IP |
+| `compare_c1_c2_c3.py / plot_qps_sweep.py` import matplotlib | 用 system `/usr/bin/python3` |
+| `run_qps_sweep_all.py::run_one_qps()` rc≠0 时丢 summary | 修法：rc 标志只打印，summary 始终从 out_path 读回（已知 bug，未修） |
+
+---
+
+## 10. 安装备忘
+
+```
+torch / torch-npu       华为镜像源装：pip install torch==2.7.1 torch-npu==2.7.1 \
+                        --extra-index-url https://mirrors.huaweicloud.com/ascend/repos/pypi
+vllm                    VLLM_TARGET_DEVICE=empty pip install -e .
+vllm-ascend             source set_env.sh && pip install -e . --no-build-isolation
+transformers            < 5.0.0
+```
+
+- 推理脚本必须在 `if __name__ == '__main__':` 内
+- vllm 的 python：`/usr/local/python3.11.13/bin/python3`
+- 出图用 system python：`/usr/bin/python3`（带 matplotlib）
+
+---
+
+## 11. Pending Questions（开放）
+
+1. **C3 反常**：vllm-ascend chunked prefill 全谱输 C1 的根因？kernel/scheduler 实现层核查
+2. **prefill chunk 粒度**：按 token 切（已定），具体值范围（512 / 1024 / 1500 / 2048…）需扫
+3. **sliding window 长度**：8 vs 几百 iter，需扫参（更长 → 更稳但响应慢；更短 → 响应快但抖）
+4. **graph bucket 列表**：vllm-ascend 实际 capture 哪些 size，对应每个 size 的 latency 画像（M3 待建表）
+5. **AICore 利用率信号**：DCMI 100ms 采样接入 SLO controller（M4 工作）
+
+---
+
+> 相关工作详细分析见 `paper_template.md`（如未生成）；Idea 方案完整版见 `idea_proposal.md`；M2 SLO-adaptive 设计文档见 `slo_adaptive_design.md`。

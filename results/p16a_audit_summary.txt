@@ -1,0 +1,151 @@
+====================================================================================
+P1.6a PID tpot 屏蔽逻辑审计 (M3.1 = c2_tdm_m31_2048)
+====================================================================================
+
+── trace = conv ──
+
+  seed0 (n_warm_ticks = 178):
+    [屏蔽路径]    M2.1 clamp:   0.0%  M2.4 sat:  99.4%  either:  99.4%  both:   0.0%
+    [屏蔽时 err_tpot_raw] mean=0.920  p50=0.950  p99=0.950  (>0 = 违例率超 target 5%)
+    [屏蔽时 tpot_viol_rate] mean=97.0%  p50=100.0%  (target=5%)
+    [delta 项]   |delta_slo|=0.0528  |delta_q|=0.0000  nonzero_q=0.0%  nonzero_slo=100.0%
+    [ratio 边界] at_max(0.8):  93.8%  at_min(0.05):   0.0%  mean=0.783  p50=0.800
+
+  seed1 (n_warm_ticks = 178):
+    [屏蔽路径]    M2.1 clamp:   0.0%  M2.4 sat:  99.4%  either:  99.4%  both:   0.0%
+    [屏蔽时 err_tpot_raw] mean=0.920  p50=0.950  p99=0.950  (>0 = 违例率超 target 5%)
+    [屏蔽时 tpot_viol_rate] mean=97.0%  p50=100.0%  (target=5%)
+    [delta 项]   |delta_slo|=0.0489  |delta_q|=0.0000  nonzero_q=0.0%  nonzero_slo=100.0%
+    [ratio 边界] at_max(0.8):  91.6%  at_min(0.05):   0.0%  mean=0.779  p50=0.800
+
+  seed2 (n_warm_ticks = 177):
+    [屏蔽路径]    M2.1 clamp:   0.0%  M2.4 sat:  99.4%  either:  99.4%  both:   0.0%
+    [屏蔽时 err_tpot_raw] mean=0.926  p50=0.950  p99=0.950  (>0 = 违例率超 target 5%)
+    [屏蔽时 tpot_viol_rate] mean=97.6%  p50=100.0%  (target=5%)
+    [delta 项]   |delta_slo|=0.0512  |delta_q|=0.0000  nonzero_q=0.0%  nonzero_slo=100.0%
+    [ratio 边界] at_max(0.8):  90.4%  at_min(0.05):   0.0%  mean=0.776  p50=0.800
+
+  ⇒ conv 跨 seed mean:
+      pct_clamp_M21                  = 0.000
+      pct_sat_M24                    = 99.437
+      pct_either                     = 99.437
+      pct_at_ratio_max               = 91.930
+      ratio_mean                     = 0.779
+      abs_delta_slo_mean             = 0.051
+      abs_delta_q_mean               = 0.000
+      pct_nonzero_delta_q            = 0.000
+
+── trace = code ──
+
+  seed0 (n_warm_ticks = 157):
+    [屏蔽路径]    M2.1 clamp:   0.0%  M2.4 sat:  99.4%  either:  99.4%  both:   0.0%
+    [屏蔽时 err_tpot_raw] mean=0.926  p50=0.927  p99=0.950  (>0 = 违例率超 target 5%)
+    [屏蔽时 tpot_viol_rate] mean=97.6%  p50=97.7%  (target=5%)
+    [delta 项]   |delta_slo|=0.1207  |delta_q|=0.0000  nonzero_q=0.0%  nonzero_slo=100.0%
+    [ratio 边界] at_max(0.8):  89.8%  at_min(0.05):   0.0%  mean=0.769  p50=0.800
+
+  seed1 (n_warm_ticks = 156):
+    [屏蔽路径]    M2.1 clamp:   0.0%  M2.4 sat:  99.4%  either:  99.4%  both:   0.0%
+    [屏蔽时 err_tpot_raw] mean=0.921  p50=0.919  p99=0.950  (>0 = 违例率超 target 5%)
+    [屏蔽时 tpot_viol_rate] mean=97.1%  p50=96.9%  (target=5%)
+    [delta 项]   |delta_slo|=0.1153  |delta_q|=0.0000  nonzero_q=0.0%  nonzero_slo=100.0%
+    [ratio 边界] at_max(0.8):  88.5%  at_min(0.05):   0.0%  mean=0.765  p50=0.800
+
+  seed2 (n_warm_ticks = 157):
+    [屏蔽路径]    M2.1 clamp:   0.0%  M2.4 sat:  99.4%  either:  99.4%  both:   0.0%
+    [屏蔽时 err_tpot_raw] mean=0.921  p50=0.919  p99=0.950  (>0 = 违例率超 target 5%)
+    [屏蔽时 tpot_viol_rate] mean=97.1%  p50=96.9%  (target=5%)
+    [delta 项]   |delta_slo|=0.1154  |delta_q|=0.0000  nonzero_q=0.0%  nonzero_slo=100.0%
+    [ratio 边界] at_max(0.8):  89.2%  at_min(0.05):   0.0%  mean=0.768  p50=0.800
+
+  ⇒ code 跨 seed mean:
+      pct_clamp_M21                  = 0.000
+      pct_sat_M24                    = 99.362
+      pct_either                     = 99.362
+      pct_at_ratio_max               = 89.147
+      ratio_mean                     = 0.767
+      abs_delta_slo_mean             = 0.117
+      abs_delta_q_mean               = 0.000
+      pct_nonzero_delta_q            = 0.000
+========================================================================================
+P1.6a 扩展 — 信号采集滞后量化 (M3.1 = c2_tdm_m31_2048, min_samples = 16)
+========================================================================================
+
+核心问题:ttft / tpot 信号几时到达 PID?ratio 推到上界发生在 warm 之前还是之后?
+
+
+── trace = conv ──
+
+  seed0  (wall = 106.6s)
+    ttft window warm @ 16.42872616004944s (n_final = 128)
+    tpot window warm @ 16.42872616004944s (n_final = 128)
+    ratio 首次到 ratio_max=0.8 @ 24.449092323303223s
+    窗口大小演进(t, n_ttft, n_tpot, ratio):
+        @   0.0s  n_ttft=  0  n_tpot=  0  ratio=0.300
+        @  35.5s  n_ttft=111  n_tpot=111  ratio=0.800
+        @  68.0s  n_ttft=128  n_tpot=128  ratio=0.800
+        @  96.4s  n_ttft=128  n_tpot=128  ratio=0.800
+        @ 106.6s  n_ttft=128  n_tpot=128  ratio=0.800
+
+  seed1  (wall = 106.5s)
+    ttft window warm @ 16.714138736724852s (n_final = 128)
+    tpot window warm @ 16.714138736724852s (n_final = 128)
+    ratio 首次到 ratio_max=0.8 @ 27.83100567817688s
+    窗口大小演进(t, n_ttft, n_tpot, ratio):
+        @   0.0s  n_ttft=  0  n_tpot=  0  ratio=0.300
+        @  36.9s  n_ttft=119  n_tpot=119  ratio=0.800
+        @  68.8s  n_ttft=128  n_tpot=128  ratio=0.800
+        @  96.9s  n_ttft=128  n_tpot=128  ratio=0.800
+        @ 106.5s  n_ttft=128  n_tpot=128  ratio=0.800
+
+  seed2  (wall = 107.6s)
+    ttft window warm @ 16.327550300598144s (n_final = 128)
+    tpot window warm @ 16.327550300598144s (n_final = 128)
+    ratio 首次到 ratio_max=0.8 @ 29.72108229827881s
+    窗口大小演进(t, n_ttft, n_tpot, ratio):
+        @   0.0s  n_ttft=  0  n_tpot=  0  ratio=0.300
+        @  36.4s  n_ttft=118  n_tpot=118  ratio=0.800
+        @  68.8s  n_ttft=128  n_tpot=128  ratio=0.800
+        @  97.1s  n_ttft=128  n_tpot=128  ratio=0.800
+        @ 107.6s  n_ttft=128  n_tpot=128  ratio=0.800
+
+  ⇒ conv 跨 seed mean:
+      warm_ttft = 16.5s | warm_tpot = 16.5s | ratio→max = 27.3s
+
+── trace = code ──
+
+  seed0  (wall = 112.7s)
+    ttft window warm @ 12.861599702835083s (n_final = 128)
+    tpot window warm @ 12.861599702835083s (n_final = 128)
+    ratio 首次到 ratio_max=0.8 @ 25.489759140014648s
+    窗口大小演进(t, n_ttft, n_tpot, ratio):
+        @   0.0s  n_ttft=  0  n_tpot=  0  ratio=0.300
+        @  39.1s  n_ttft=128  n_tpot=128  ratio=0.800
+        @  69.4s  n_ttft=128  n_tpot=128  ratio=0.800
+        @ 104.8s  n_ttft=128  n_tpot=128  ratio=0.800
+        @ 112.7s  n_ttft=128  n_tpot=128  ratio=0.800
+
+  seed1  (wall = 112.6s)
+    ttft window warm @ 12.983411825180054s (n_final = 128)
+    tpot window warm @ 12.983411825180054s (n_final = 128)
+    ratio 首次到 ratio_max=0.8 @ 27.712590364456176s
+    窗口大小演进(t, n_ttft, n_tpot, ratio):
+        @   0.0s  n_ttft=  0  n_tpot=  0  ratio=0.300
+        @  37.6s  n_ttft=128  n_tpot=128  ratio=0.800
+        @  68.8s  n_ttft=128  n_tpot=128  ratio=0.800
+        @ 105.0s  n_ttft=128  n_tpot=128  ratio=0.800
+        @ 112.6s  n_ttft=128  n_tpot=128  ratio=0.800
+
+  seed2  (wall = 112.2s)
+    ttft window warm @ 12.898011672973633s (n_final = 128)
+    tpot window warm @ 12.898011672973633s (n_final = 128)
+    ratio 首次到 ratio_max=0.8 @ 26.550822565078736s
+    窗口大小演进(t, n_ttft, n_tpot, ratio):
+        @   0.0s  n_ttft=  0  n_tpot=  0  ratio=0.300
+        @  38.7s  n_ttft=128  n_tpot=128  ratio=0.800
+        @  68.6s  n_ttft=128  n_tpot=128  ratio=0.800
+        @ 104.6s  n_ttft=128  n_tpot=128  ratio=0.800
+        @ 112.2s  n_ttft=128  n_tpot=128  ratio=0.800
+
+  ⇒ code 跨 seed mean:
+      warm_ttft = 12.9s | warm_tpot = 12.9s | ratio→max = 26.6s

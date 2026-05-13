@@ -1,0 +1,117 @@
+{
+  "wall_time_s": 544.0,
+  "duration_s": 60.0,
+  "warmup_s": 20.0,
+  "qps_points": [
+    16.0,
+    32.0
+  ],
+  "slo_ttft_ms": 500.0,
+  "slo_tpot_ms": 50.0,
+  "configs": {
+    "c2_tdm_m23": [
+      {
+        "config_name": "c2_tdm_m23",
+        "workload_name": "poisson_qps16.0_dur60s",
+        "qps_target": 16.0,
+        "duration_s": 60.0,
+        "warmup_s": 20.0,
+        "base_url": "http://127.0.0.1:8000",
+        "model": "/vllm-workspace/models/models/Qwen3-8B",
+        "tracker_jsonl": "/vllm-workspace/Ascend-PD-TDM/results/tdm_trace/qps_sweep_c2_tdm_m23_req.jsonl",
+        "n_submitted": 979,
+        "n_ok": 979,
+        "n_err": 0,
+        "wallclock_s": 104.529,
+        "qps_actual_arrival": 16.317,
+        "window": {
+          "window_s": [
+            20.0,
+            60.0
+          ],
+          "n_in_window": 626,
+          "n_ok": 626,
+          "n_matched": 626,
+          "n_unmatched": 0,
+          "n_meet_slo": 350,
+          "ttft_ms": {
+            "mean": 58.442,
+            "p50": 43.513,
+            "p99": 233.466,
+            "min": 23.706,
+            "max": 233.466
+          },
+          "tpot_ms_mean": {
+            "mean": 47.919,
+            "p50": 48.914,
+            "p99": 59.47,
+            "min": 27.497,
+            "max": 62.606
+          },
+          "e2e_ms": {
+            "mean": 30328.219,
+            "p50": 29605.329,
+            "p99": 48753.25,
+            "min": 14864.455,
+            "max": 49939.345
+          },
+          "output_throughput_tok_s": 2851.65,
+          "goodput_tok_s": 1736.3,
+          "slo_ttft_ms": 500.0,
+          "slo_tpot_ms": 50.0
+        }
+      },
+      {
+        "config_name": "c2_tdm_m23",
+        "workload_name": "poisson_qps32.0_dur60s",
+        "qps_target": 32.0,
+        "duration_s": 60.0,
+        "warmup_s": 20.0,
+        "base_url": "http://127.0.0.1:8000",
+        "model": "/vllm-workspace/models/models/Qwen3-8B",
+        "tracker_jsonl": "/vllm-workspace/Ascend-PD-TDM/results/tdm_trace/qps_sweep_c2_tdm_m23_req.jsonl",
+        "n_submitted": 1907,
+        "n_ok": 1820,
+        "n_err": 87,
+        "wallclock_s": 303.295,
+        "qps_actual_arrival": 31.783,
+        "window": {
+          "window_s": [
+            20.0,
+            60.0
+          ],
+          "n_in_window": 1247,
+          "n_ok": 1247,
+          "n_matched": 1247,
+          "n_unmatched": 0,
+          "n_meet_slo": 897,
+          "ttft_ms": {
+            "mean": 102.622,
+            "p50": 76.323,
+            "p99": 377.728,
+            "min": 22.601,
+            "max": 377.728
+          },
+          "tpot_ms_mean": {
+            "mean": 43.167,
+            "p50": 42.28,
+            "p99": 57.415,
+            "min": 24.928,
+            "max": 69.481
+          },
+          "e2e_ms": {
+            "mean": 172644.207,
+            "p50": 173305.716,
+            "p99": 197015.631,
+            "min": 140408.224,
+            "max": 199569.572
+          },
+          "output_throughput_tok_s": 5948.38,
+          "goodput_tok_s": 4306.27,
+          "slo_ttft_ms": 500.0,
+          "slo_tpot_ms": 50.0
+        }
+      }
+    ]
+  }
+}

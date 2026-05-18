@@ -151,6 +151,10 @@ def build_additional_config(config_name: str, run_id: str,
         "c2_tdm_m1_chunk2048_r01": 0.1,
         "c2_tdm_m1_chunk2048_r05": 0.5,
         "c2_tdm_m1_chunk2048_r07": 0.7,
+        # P1.9d 双维度协同 ablation (2026-05-17):r08 对应 M3.1 在 saturated
+        # 上 PID 收敛到的稳态 ratio_max=0.8。是"只快(static + bucket)"的
+        # C 配置锚点 — 跟 M3.1 比能看慢回路 dynamic 调整在稳态有无 Δ。
+        "c2_tdm_m1_chunk2048_r08": 0.8,
         "c2_tdm_m1_chunk2048_r09": 0.9,
     }
     if config_name in _m1_chunk2048_ratio_variants:
@@ -168,6 +172,58 @@ def build_additional_config(config_name: str, run_id: str,
                 "kv_free_watermark": 0.05,
                 "initial_phase": "prefill",
                 "prefill_chunk_tokens": 2048,
+                **common,
+            },
+        }
+    # P1.9d 双维度协同 ablation cells (2026-05-17)。bucket_cap=1 把快回路
+    # 的 burst 能力去掉,等价于"慢回路调 ratio,快回路退化为严格按 ratio 平
+    # 滑分配"。组合:
+    #   A 都没有:c2_tdm_m1_r08_cap1   (static + cap=1)
+    #   B 只慢:  c2_tdm_m31_2048_cap1 (PID + cap=1)
+    #   C 只快:  c2_tdm_m1_chunk2048_r08 (static + cap=4 = M1@ratio_max)
+    #   D 慢+快: c2_tdm_m31_2048      (PID + cap=4 = M3.1 原版)
+    # 协同 Δ = D - max(B, C),稳态 saturated 上预期 ≈ 0(P1.9a 实证 PID 钉
+    # ratio_max,跟 static@0.8 等价)。这次实验是直接锁这个结构性结论。
+    if config_name == "c2_tdm_m1_r08_cap1":
+        return {
+            "ascend_scheduler_config": {
+                "enabled": True,
+                "scheduler_cls": "vllm_ascend.core.tdm.scheduler.TDMScheduler",
+            },
+            "tdm": {
+                "enable_tdm": True,
+                "controller_kind": "static",
+                "static_ratio": 0.8,
+                "min_slice_iters": 2,
+                "max_slice_iters": 8,
+                "kv_free_watermark": 0.05,
+                "initial_phase": "prefill",
+                "prefill_chunk_tokens": 2048,
+                "bucket_cap": 1,
+                **common,
+            },
+        }
+    if config_name == "c2_tdm_m31_2048_cap1":
+        return {
+            "ascend_scheduler_config": {
+                "enabled": True,
+                "scheduler_cls": "vllm_ascend.core.tdm.scheduler.TDMScheduler",
+            },
+            "tdm": {
+                "enable_tdm": True,
+                "controller_kind": "slo_pid",
+                "static_ratio": 0.3,
+                "min_slice_iters": 2,
+                "max_slice_iters": 8,
+                "kv_free_watermark": 0.05,
+                "initial_phase": "prefill",
+                "slo_starvation_min_ticks": 10**9,
+                "slo_pid_kp_q": 0.0,
+                "slo_tpot_saturation_enabled": True,
+                "slo_tpot_saturation_min_ticks": 2,
+                "slo_pid_relu_err": True,
+                "prefill_chunk_tokens": 2048,
+                "bucket_cap": 1,
                 **common,
             },
         }
@@ -423,6 +479,35 @@ def build_additional_config(config_name: str, run_id: str,
                 **common,
             },
         }
+    # c2_tdm_m31_fia: 跟 c2_tdm_m31_2048 完全一致,只是 attention 强制走 FIA
+    # (_forward_v1_style)。用于 ablation 拆分:
+    #   delta(m31_2048 - m31_fia)  = dedicated kernel 速度贡献
+    #   delta(m31_fia - c3_cp)     = phase-pure 调度策略本身的贡献
+    # 在 v0.11.0rc1 上预演 vllm-ascend v0.13+ 把 attention 统一到 FIA 的行为。
+    if config_name == "c2_tdm_m31_fia":
+        return {
+            "ascend_scheduler_config": {
+                "enabled": True,
+                "scheduler_cls": "vllm_ascend.core.tdm.scheduler.TDMScheduler",
+            },
+            "tdm": {
+                "enable_tdm": True,
+                "controller_kind": "slo_pid",
+                "static_ratio": 0.3,
+                "min_slice_iters": 2,
+                "max_slice_iters": 8,
+                "kv_free_watermark": 0.05,
+                "initial_phase": "prefill",
+                "slo_starvation_min_ticks": 10**9,
+                "slo_pid_kp_q": 0.0,
+                "slo_tpot_saturation_enabled": True,
+                "slo_tpot_saturation_min_ticks": 2,
+                "slo_pid_relu_err": True,
+                "prefill_chunk_tokens": 2048,
+                "force_fia_attention": True,
+                **common,
+            },
+        }
     # M3.2: M3.1 + P1.7 TTFT-urgency fast loop. Motivation: P1.5 cross-window
     # showed M3.1 vs M1+chunk delta collapsed to ~0 on saturated code traces
     # under strict TPOT — the slow PID loop cannot react inside a single SLO
@@ -458,6 +543,53 @@ def build_additional_config(config_name: str, run_id: str,
                 "urgency_ttft_enabled": True,
                 "urgency_ttft_threshold": 0.8,
                 "urgency_charge_bucket": True,
+                **common,
+            },
+        }
+    # M3.3: M3.1 + P1.7b bidirectional fast loop (urgency_ttft +
+    # starvation_tpot). Companion to M3.2 (urgency only). Threshold variants
+    # _starv{2,3,5} = starvation_tpot_threshold ∈ {2.0, 3.0, 5.0} (units of
+    # slo_tpot_ms). Default _2048 uses 3.0.
+    M33_VARIANTS = {
+        "c2_tdm_m33_2048":       {"chunk": 2048, "starv": 3.0, "decouple": False},
+        "c2_tdm_m33_2048_starv2": {"chunk": 2048, "starv": 2.0, "decouple": False},
+        "c2_tdm_m33_2048_starv5": {"chunk": 2048, "starv": 5.0, "decouple": False},
+        # P1.7b decouple ablation (2026-05-17). Drops the `tokens >= 1.0`
+        # AND-gate in selector starvation check so silence>=threshold alone
+        # fires rescue. Same starv values as the gated variants for direct
+        # comparison; bucket still NOT debited on rescue.
+        "c2_tdm_m33_2048_decouple":       {"chunk": 2048, "starv": 3.0, "decouple": True},
+        "c2_tdm_m33_2048_decouple_starv2": {"chunk": 2048, "starv": 2.0, "decouple": True},
+        "c2_tdm_m33_2048_decouple_starv5": {"chunk": 2048, "starv": 5.0, "decouple": True},
+    }
+    if config_name in M33_VARIANTS:
+        v = M33_VARIANTS[config_name]
+        return {
+            "ascend_scheduler_config": {
+                "enabled": True,
+                "scheduler_cls": "vllm_ascend.core.tdm.scheduler.TDMScheduler",
+            },
+            "tdm": {
+                "enable_tdm": True,
+                "controller_kind": "slo_pid",
+                "static_ratio": 0.3,
+                "min_slice_iters": 2,
+                "max_slice_iters": 8,
+                "kv_free_watermark": 0.05,
+                "initial_phase": "prefill",
+                "slo_starvation_min_ticks": 10**9,
+                "slo_pid_kp_q": 0.0,
+                "slo_tpot_saturation_enabled": True,
+                "slo_tpot_saturation_min_ticks": 2,
+                "slo_pid_relu_err": True,
+                "prefill_chunk_tokens": v["chunk"],
+                # P1.7 urgency_ttft + P1.7b starvation_tpot bidirectional
+                "urgency_ttft_enabled": True,
+                "urgency_ttft_threshold": 0.8,
+                "urgency_charge_bucket": True,
+                "starvation_tpot_enabled": True,
+                "starvation_tpot_threshold": v["starv"],
+                "starvation_decouple_bucket": v["decouple"],
                 **common,
             },
         }
@@ -857,7 +989,7 @@ def run_config(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--configs", default="c1_baseline,c2_tdm",
-                        help="逗号分隔，可选: c1_baseline, c2_tdm, c2_tdm_m2, c2_tdm_m21, c2_tdm_m22, c2_tdm_m23, c2_tdm_m24, c2_tdm_m25, c2_tdm_m26, c2_tdm_m27, c2_tdm_m31, c3_cp, c4_pd")
+                        help="逗号分隔，可选: c1_baseline, c2_tdm, c2_tdm_m2, c2_tdm_m21, c2_tdm_m22, c2_tdm_m23, c2_tdm_m24, c2_tdm_m25, c2_tdm_m26, c2_tdm_m27, c2_tdm_m31, c2_tdm_m31_fia, c3_cp, c4_pd")
     parser.add_argument("--qps", default=None,
                         help="逗号分隔 QPS 点，默认 4,8,16,32,64")
     parser.add_argument("--duration", type=float, default=DEFAULT_DURATION)

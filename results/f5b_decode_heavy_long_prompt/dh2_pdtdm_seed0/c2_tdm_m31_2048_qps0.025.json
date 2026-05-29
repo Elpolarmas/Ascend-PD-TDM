@@ -1,0 +1,111 @@
+{
+  "summary": {
+    "config_name": "c2_tdm_m31_2048",
+    "workload_name": "poisson_qps0.025_dur180s",
+    "qps_target": 0.025,
+    "duration_s": 180.0,
+    "warmup_s": 30.0,
+    "base_url": "http://127.0.0.1:8000",
+    "model": "/vllm-workspace/models/models/Qwen3-8B",
+    "tracker_jsonl": "/vllm-workspace/Ascend-PD-TDM/results/tdm_trace/qps_sweep_c2_tdm_m31_2048_req.jsonl",
+    "n_submitted": 2,
+    "n_ok": 2,
+    "n_err": 0,
+    "wallclock_s": 250.245,
+    "qps_actual_arrival": 0.011,
+    "window": {
+      "window_s": [
+        30.0,
+        180.0
+      ],
+      "n_in_window": 2,
+      "n_ok": 2,
+      "n_matched": 2,
+      "n_unmatched": 0,
+      "n_meet_slo": 1,
+      "ttft_ms": {
+        "mean": 509.062,
+        "p50": 486.526,
+        "p99": 531.598,
+        "min": 486.526,
+        "max": 531.598
+      },
+      "tpot_ms_mean": {
+        "mean": 24.264,
+        "p50": 24.062,
+        "p99": 24.465,
+        "min": 24.062,
+        "max": 24.465
+      },
+      "e2e_ms": {
+        "mean": 136521.194,
+        "p50": 127174.098,
+        "p99": 145868.291,
+        "min": 127174.098,
+        "max": 145868.291
+      },
+      "output_throughput_tok_s": 74.76,
+      "goodput_tok_s": 40.27,
+      "slo_ttft_ms": 500.0,
+      "slo_tpot_ms": 200.0
+    }
+  },
+  "joined": [
+    {
+      "req_id": "syn-0-000000",
+      "arrival_time_s": 74.42428444260894,
+      "server_req_id": "cmpl-b0fc480de3004b80a65ed74490146296",
+      "status": 200,
+      "e2e_ms": 145868.291,
+      "ttft_ms": 486.5264091491699,
+      "tpot_ms_mean": 24.061981993610644,
+      "tpot_ms_p99": 33.740468978881836,
+      "prompt_tokens": 5054,
+      "output_tokens": 6040,
+      "matched": true
+    },
+    {
+      "req_id": "syn-0-000001",
+      "arrival_time_s": 123.02128356925479,
+      "server_req_id": "cmpl-c1d6a177d3d9486e9ebb2d42a717d7e0",
+      "status": 200,
+      "e2e_ms": 127174.098,
+      "ttft_ms": 531.5975170135498,
+      "tpot_ms_mean": 24.465057518688226,
+      "tpot_ms_p99": 33.42708969116211,
+      "prompt_tokens": 4966,
+      "output_tokens": 5174,
+      "matched": true
+    }
+  ],
+  "client_records": [
+    {
+      "req_id": "syn-0-000000",
+      "arrival_time_s": 74.42428444260894,
+      "submit_ts": 15415775.11785304,
+      "finish_ts": 15415920.986144066,
+      "status": 200,
+      "prompt_tokens": 5054,
+      "completion_tokens": 6040,
+      "server_req_id": "cmpl-b0fc480de3004b80a65ed74490146296",
+      "error": null,
+      "client_ttft_ms": null,
+      "client_tpot_ms_mean": null,
+      "client_n_chunks": null
+    },
+    {
+      "req_id": "syn-0-000001",
+      "arrival_time_s": 123.02128356925479,
+      "submit_ts": 15415823.755391838,
+      "finish_ts": 15415950.929489747,
+      "status": 200,
+      "prompt_tokens": 4966,
+      "completion_tokens": 5174,
+      "server_req_id": "cmpl-c1d6a177d3d9486e9ebb2d42a717d7e0",
+      "error": null,
+      "client_ttft_ms": null,
+      "client_tpot_ms_mean": null,
+      "client_n_chunks": null
+    }
+  ]
+}

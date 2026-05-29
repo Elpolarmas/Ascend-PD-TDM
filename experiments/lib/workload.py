@@ -435,3 +435,268 @@ class AzureTraceReplay(WorkloadSource):
                 target_prompt_tokens=pt,
             )
             emitted += 1
+
+
+# ---------------------------------------------------------------------------
+# TraceSampledPoisson — Phase 1 T5 winning-region QPS sweep
+# ---------------------------------------------------------------------------
+
+
+class TraceSampledPoisson(WorkloadSource):
+    """Poisson arrival at controlled QPS, prompt/output lengths sampled
+    from a trace CSV. Used by Phase 1 T5 (D-012):
+      - "controlled QPS sweep" 需要可控 qps(trace replay 锁死在 trace 自身的
+        arrival rate,无法变化)
+      - "trace-sampled synthetic" 需要 prompt/output 长度分布跟 trace 一致
+        (SyntheticPoisson 用 lognormal short/long profile,跟 Azure 真实分布有 gap)
+
+    本类把两者结合:Poisson arrival(target qps)+ 长度 from CSV rows。
+    Rows 在初始化时从 CSV 读完一次,随后按 seed 重复采样(replacement)。
+    """
+
+    def __init__(
+        self,
+        trace_csv: str,
+        qps: float,
+        duration_s: float,
+        seed: int = 0,
+        max_prompt_tokens: int | None = None,
+        max_output_tokens: int | None = None,
+    ) -> None:
+        if qps <= 0:
+            raise ValueError(f"qps must be > 0, got {qps}")
+        if duration_s <= 0:
+            raise ValueError(f"duration_s must be > 0, got {duration_s}")
+        self.trace_csv = trace_csv
+        self.qps = qps
+        self.duration_s = duration_s
+        self.seed = seed
+        self.max_prompt_tokens = max_prompt_tokens
+        self.max_output_tokens = max_output_tokens
+
+    @property
+    def name(self) -> str:
+        base = self.trace_csv.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        return (f"trace_sampled_{base}_qps{self.qps:g}"
+                f"_dur{int(self.duration_s)}s_s{self.seed}")
+
+    def __iter__(self) -> Iterator[Request]:
+        # Load all valid (pt, ot) pairs from CSV once,via AzureTraceReplay loader
+        # for schema compatibility. Then Poisson arrivals + random sampling.
+        loader = AzureTraceReplay(
+            trace_csv=self.trace_csv,
+            duration_s=None,
+            start_offset_s=0.0,
+            time_scale=1.0,
+            seed=self.seed,
+            max_rows=None,
+            max_prompt_tokens=self.max_prompt_tokens,
+            max_output_tokens=self.max_output_tokens,
+            skip_oversize=True,
+        )
+        records = loader._load()
+        if not records:
+            raise ValueError(f"no usable rows in {self.trace_csv}")
+
+        arrival_rng = random.Random(self.seed)
+        sample_rng = random.Random(self.seed + 7919)
+        prompt_rng = random.Random(self.seed + 1019)
+
+        t = 0.0
+        i = 0
+        while True:
+            # Poisson inter-arrival = exponential(qps)
+            t += arrival_rng.expovariate(self.qps)
+            if t >= self.duration_s:
+                break
+            _, pt, ot = sample_rng.choice(records)
+            yield Request(
+                req_id=f"trace_pois-{self.seed}-{i:06d}",
+                arrival_time_s=t,
+                prompt=_make_prompt(pt, prompt_rng),
+                max_tokens=ot,
+                target_prompt_tokens=pt,
+            )
+            i += 1
+
+
+# ---------------------------------------------------------------------------
+# TraceSampledBurst — Phase 1 T5b burst-arrival winning-region sweep
+# ---------------------------------------------------------------------------
+
+
+class TraceSampledBurst(WorkloadSource):
+    """Burst arrival pattern + prompt/output lengths from trace CSV.
+
+    Phase 1 T5 用 TraceSampledPoisson 发现 Poisson 平均化抹掉了 real trace 的 burst
+    structure → conv 工况在 qps=16 都看不到饱和。T5b 用 burst arrival 复原
+    paradigm-level 差异(burst 是 saturation 的关键驱动)。
+
+    Burst pattern 跟 SyntheticBurst 一致(thinning algorithm):
+      - 周期 burst_period_s 内,前 burst_high_frac 段按 burst_high_qps 到达
+      - 其余按 burst_low_qps 到达
+      - 平均 qps = high × frac + low × (1-frac)
+
+    Calibration(本类的 use case)从真实 trace 测算:
+      conv: high=12 low=5 frac=0.1 → avg ≈ 5.7 (matches conv real avg 5.5)
+      code: high=10 low=1 frac=0.2 → avg ≈ 2.8 (matches code real avg 2.6)
+    """
+
+    def __init__(
+        self,
+        trace_csv: str,
+        burst_period_s: float,
+        burst_high_qps: float,
+        burst_low_qps: float,
+        burst_high_frac: float,
+        duration_s: float,
+        seed: int = 0,
+        max_prompt_tokens: int | None = None,
+        max_output_tokens: int | None = None,
+    ) -> None:
+        if not (0.0 < burst_high_frac < 1.0):
+            raise ValueError(f"burst_high_frac must be in (0, 1), got {burst_high_frac}")
+        if burst_high_qps <= burst_low_qps:
+            raise ValueError(f"burst_high_qps ({burst_high_qps}) must exceed "
+                             f"burst_low_qps ({burst_low_qps})")
+        if duration_s <= 0:
+            raise ValueError(f"duration_s must be > 0, got {duration_s}")
+        self.trace_csv = trace_csv
+        self.burst_period_s = burst_period_s
+        self.burst_high_qps = burst_high_qps
+        self.burst_low_qps = burst_low_qps
+        self.burst_high_frac = burst_high_frac
+        self.t_high = burst_period_s * burst_high_frac
+        self.duration_s = duration_s
+        self.seed = seed
+        self.max_prompt_tokens = max_prompt_tokens
+        self.max_output_tokens = max_output_tokens
+        self.avg_qps = (burst_high_qps * burst_high_frac
+                        + burst_low_qps * (1.0 - burst_high_frac))
+
+    @property
+    def name(self) -> str:
+        base = self.trace_csv.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        return (f"trace_sampled_burst_{base}_high{self.burst_high_qps:.0f}"
+                f"_low{self.burst_low_qps:.0f}_frac{self.burst_high_frac:.2f}"
+                f"_period{self.burst_period_s:.0f}s_dur{int(self.duration_s)}s"
+                f"_s{self.seed}")
+
+    def _qps_at(self, t: float) -> float:
+        phase_t = t % self.burst_period_s
+        return (self.burst_high_qps if phase_t < self.t_high
+                else self.burst_low_qps)
+
+    def __iter__(self) -> Iterator[Request]:
+        # Load trace rows once for prompt/output sampling
+        loader = AzureTraceReplay(
+            trace_csv=self.trace_csv,
+            duration_s=None, start_offset_s=0.0, time_scale=1.0,
+            seed=self.seed,
+            max_rows=None,
+            max_prompt_tokens=self.max_prompt_tokens,
+            max_output_tokens=self.max_output_tokens,
+            skip_oversize=True,
+        )
+        records = loader._load()
+        if not records:
+            raise ValueError(f"no usable rows in {self.trace_csv}")
+
+        arrival_rng = random.Random(self.seed)
+        sample_rng = random.Random(self.seed + 7919)
+        prompt_rng = random.Random(self.seed + 1019)
+
+        max_qps = self.burst_high_qps
+        t = 0.0
+        idx = 0
+        while True:
+            t += arrival_rng.expovariate(max_qps)
+            if t >= self.duration_s:
+                return
+            # Thinning: accept with prob qps_t / max_qps
+            current_qps = self._qps_at(t)
+            if arrival_rng.random() >= current_qps / max_qps:
+                continue
+            _, pt, ot = sample_rng.choice(records)
+            yield Request(
+                req_id=f"tsb-{self.seed}-{idx:06d}",
+                arrival_time_s=t,
+                prompt=_make_prompt(pt, prompt_rng),
+                max_tokens=ot,
+                target_prompt_tokens=pt,
+            )
+            idx += 1
+
+
+# ---------------------------------------------------------------------------
+# Sequential (concurrent=1) micro-benchmark sampler — Phase A ideal latency
+# ---------------------------------------------------------------------------
+
+
+class SequentialSampler(WorkloadSource):
+    """Concurrent=1 micro-benchmark: random-sample N rows from a trace CSV,
+    yield with arrival_time_s = request index (no inter-arrival gap, no
+    queueing). Driver runs in sequential await-each mode so only one
+    request is in flight at a time — measured TTFT/TPOT approximate the
+    single-request (ideal) limit on the same stack as main experiments.
+
+    Why not trace-based low-qps as ideal proxy: D-012 实证 conv/code 低 qps
+    段仍受 queueing 污染 (conv qps=3.18, code qps=1.05),且 code 端 prompt
+    分布有 10× workload bias。Sarathi-Serve / Semi-PD 都用 concurrent=1
+    micro-benchmark 测 ideal,本类是同款。
+    """
+
+    def __init__(
+        self,
+        trace_csv: str,
+        n_samples: int,
+        seed: int = 0,
+        max_prompt_tokens: int | None = None,
+        max_output_tokens: int | None = None,
+    ) -> None:
+        if n_samples <= 0:
+            raise ValueError(f"n_samples must be > 0, got {n_samples}")
+        self.trace_csv = trace_csv
+        self.n_samples = n_samples
+        self.seed = seed
+        self.max_prompt_tokens = max_prompt_tokens
+        self.max_output_tokens = max_output_tokens
+
+    @property
+    def name(self) -> str:
+        base = self.trace_csv.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        return f"seq_{base}_n{self.n_samples}_s{self.seed}"
+
+    def __iter__(self) -> Iterator[Request]:
+        # 复用 AzureTraceReplay 的 CSV loader,保证 prompt/output token 字段
+        # 解析口径一致;读完之后随机挑 N 条。
+        loader = AzureTraceReplay(
+            trace_csv=self.trace_csv,
+            duration_s=None,
+            start_offset_s=0.0,
+            time_scale=1.0,
+            seed=self.seed,
+            max_rows=None,
+            max_prompt_tokens=self.max_prompt_tokens,
+            max_output_tokens=self.max_output_tokens,
+            skip_oversize=True,
+        )
+        records = loader._load()
+        rng = random.Random(self.seed)
+        prompt_rng = random.Random(self.seed + 7919)  # 跟主 RNG 解耦,token filler 独立
+        if len(records) < self.n_samples:
+            raise ValueError(
+                f"trace {self.trace_csv} has only {len(records)} usable rows "
+                f"after filtering, need {self.n_samples}"
+            )
+        picks = rng.sample(records, self.n_samples)
+        for i, (_t, pt, ot) in enumerate(picks):
+            yield Request(
+                req_id=f"seq-{self.seed}-{i:04d}",
+                # arrival_time_s = i 让 aggregate_window 的 warmup_s 过滤逻辑
+                # 当成"前 K 个 request 是 warmup"用,不需要改 metrics.py
+                arrival_time_s=float(i),
+                prompt=_make_prompt(pt, prompt_rng),
+                max_tokens=ot,
+                target_prompt_tokens=pt,
+            )

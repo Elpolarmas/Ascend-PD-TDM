@@ -27,7 +27,10 @@ import httpx
 from lib.metrics import aggregate_window, join, load_tracker_records
 from lib.workload import (  # noqa: F401
     AzureTraceReplay,
+    SequentialSampler,
     SyntheticBurst,
+    TraceSampledBurst,
+    TraceSampledPoisson,
     DEFAULT_PROMPT_PROFILE,
     PROMPT_PROFILES,
     Request,
@@ -202,6 +205,7 @@ async def run_driver(
     max_concurrency: int = 256,
     stream: bool = False,
     ignore_eos: bool = False,
+    sequential: bool = False,
 ) -> tuple[list[ClientRecord], float]:
     # 连接池要够大：高 QPS × 长 read（max_tokens 大）会让 in-flight 请求数远超 QPS。
     # pool timeout 拉到和 read 一样长，避免「拿不到连接」被误判成 server 崩溃。
@@ -218,16 +222,39 @@ async def run_driver(
         transport=transport, trust_env=False,
     ) as client:
         t0 = time.perf_counter()
-        for req in workload:
-            tasks.append(asyncio.create_task(
-                _send_one(client, model, req, t0, records, stream,
-                          ignore_eos=ignore_eos)))
-            # 让出控制权，使 sleep/调度真正并发
-            if len(tasks) % 32 == 0:
-                await asyncio.sleep(0)
-        # 等所有任务结束（受 timeout 兜底）
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        if sequential:
+            # Concurrent=1 micro-benchmark: await each request before next
+            # so only one is in flight on the server side. arrival_time_s
+            # in the Request is interpreted as request-index (set by
+            # SequentialSampler), not wall-clock — _send_one's "sleep until
+            # arrival" math still works because we override arrival_time_s
+            # to current wall offset before sending.
+            for req in workload:
+                # Force submit immediately (skip _send_one's arrival-time sleep)
+                req_now = Request(
+                    req_id=req.req_id,
+                    arrival_time_s=req.arrival_time_s,  # keep index for warmup filter
+                    prompt=req.prompt,
+                    max_tokens=req.max_tokens,
+                    target_prompt_tokens=req.target_prompt_tokens,
+                )
+                # _send_one uses arrival_time_s as a target submit offset.
+                # We want immediate submit, so pass a t0 that makes
+                # (arrival_time_s - elapsed) <= 0.
+                fake_t0 = time.perf_counter() - (req.arrival_time_s + 1.0)
+                await _send_one(client, model, req_now, fake_t0, records,
+                                stream, ignore_eos=ignore_eos)
+        else:
+            for req in workload:
+                tasks.append(asyncio.create_task(
+                    _send_one(client, model, req, t0, records, stream,
+                              ignore_eos=ignore_eos)))
+                # 让出控制权，使 sleep/调度真正并发
+                if len(tasks) % 32 == 0:
+                    await asyncio.sleep(0)
+            # 等所有任务结束（受 timeout 兜底）
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
         wallclock = time.perf_counter() - t0
     return records, wallclock
 
@@ -302,8 +329,21 @@ def main() -> int:
     # "burst" = periodic square-wave;
     # "trace" = real workload replay (e.g. Azure LLM Inference Trace).
     parser.add_argument("--arrival-mode",
-                        choices=["poisson", "burst", "trace"],
-                        default="poisson")
+                        choices=["poisson", "burst", "trace", "sequential",
+                                 "trace_sampled", "trace_sampled_burst"],
+                        default="poisson",
+                        help="sequential = concurrent=1 micro-benchmark, "
+                             "samples --num-samples rows from --trace-file "
+                             "and issues them one at a time. --qps / "
+                             "--duration ignored; --warmup is # warmup reqs. "
+                             "trace_sampled = Poisson arrival at --qps with "
+                             "prompt/output lengths sampled from --trace-file "
+                             "rows (Phase 1 T5). trace_sampled_burst = burst "
+                             "arrival (--burst-* params) + lengths from "
+                             "--trace-file (Phase 1 T5b).")
+    parser.add_argument("--num-samples", type=int, default=50,
+                        help="Number of samples for sequential mode "
+                             "(--arrival-mode=sequential).")
     parser.add_argument("--burst-period", type=float, default=10.0,
                         help="Burst period in seconds (only for burst mode)")
     parser.add_argument("--burst-high-qps", type=float, default=64.0,
@@ -345,15 +385,62 @@ def main() -> int:
                   else int(prof["prompt_max"]))
     # mixture 模式（如 "mixed" profile）从 profile 拿；CLI 不暴露（profile-only 特性）
     prompt_mixture = prof.get("prompt_mixture")
-    if args.arrival_mode == "trace":
+    if args.arrival_mode == "sequential":
+        # Concurrent=1 micro-benchmark: random-sample rows from a trace CSV,
+        # issue them one at a time. --qps / --duration are ignored.
+        if not args.trace_file:
+            raise SystemExit(
+                "--arrival-mode=sequential requires --trace-file PATH"
+            )
+        workload = SequentialSampler(
+            trace_csv=args.trace_file,
+            n_samples=args.num_samples,
+            seed=args.seed,
+            max_prompt_tokens=args.trace_max_prompt_tokens,
+            max_output_tokens=args.trace_max_output_tokens,
+        )
+    elif args.arrival_mode == "trace_sampled":
+        # Poisson arrival at controlled qps, prompt/output lengths from trace
+        if not args.trace_file:
+            raise SystemExit(
+                "--arrival-mode=trace_sampled requires --trace-file PATH"
+            )
+        workload = TraceSampledPoisson(
+            trace_csv=args.trace_file,
+            qps=args.qps,
+            duration_s=args.duration,
+            seed=args.seed,
+            max_prompt_tokens=args.trace_max_prompt_tokens,
+            max_output_tokens=args.trace_max_output_tokens,
+        )
+    elif args.arrival_mode == "trace_sampled_burst":
+        # Burst arrival + lengths from trace (T5b)
+        if not args.trace_file:
+            raise SystemExit(
+                "--arrival-mode=trace_sampled_burst requires --trace-file PATH"
+            )
+        workload = TraceSampledBurst(
+            trace_csv=args.trace_file,
+            burst_period_s=args.burst_period,
+            burst_high_qps=args.burst_high_qps,
+            burst_low_qps=args.burst_low_qps,
+            burst_high_frac=args.burst_high_frac,
+            duration_s=args.duration,
+            seed=args.seed,
+            max_prompt_tokens=args.trace_max_prompt_tokens,
+            max_output_tokens=args.trace_max_output_tokens,
+        )
+    elif args.arrival_mode == "trace":
         if not args.trace_file:
             raise SystemExit("--arrival-mode=trace requires --trace-file PATH")
         # Trace mode ignores --qps / --prompt-* / --output-* (lengths come
-        # from trace rows). --duration still bounds the replay window
-        # (post-scale seconds); use None to replay entire trace.
+        # from trace rows). --duration is wall-clock (post-scale); pre-scale
+        # window passed to AzureTraceReplay = duration × time_scale so that
+        # arrivals span the full driver window regardless of time_scale.
         workload = AzureTraceReplay(
             trace_csv=args.trace_file,
-            duration_s=args.duration if args.duration > 0 else None,
+            duration_s=(args.duration * args.trace_time_scale
+                        if args.duration > 0 else None),
             start_offset_s=args.trace_start_offset,
             time_scale=args.trace_time_scale,
             seed=args.seed,
@@ -384,11 +471,19 @@ def main() -> int:
             output_min=args.output_min, output_max=args.output_max,
             prompt_mixture=prompt_mixture,
         )
+    # Sequential mode: arrival_time_s is request index (0..N-1), so the
+    # aggregate-window filter [warmup_s, duration_s) must be expressed in
+    # request-index units too. Override duration_s = num_samples so the
+    # window covers all submitted requests; warmup_s is # warmup requests.
+    if args.arrival_mode == "sequential":
+        agg_duration_s = float(args.num_samples)
+    else:
+        agg_duration_s = args.duration
     cfg = RunSummary(
         config_name=args.config_name,
         workload_name=workload.name,
         qps_target=args.qps,
-        duration_s=args.duration,
+        duration_s=agg_duration_s,
         warmup_s=args.warmup,
         base_url=args.base_url,
         model=args.model,
@@ -403,8 +498,13 @@ def main() -> int:
         workload, args.base_url, args.model, args.duration,
         max_concurrency=args.max_concurrency,
         stream=args.stream,
-        # trace replay needs ignore_eos to make decode length deterministic
-        ignore_eos=(args.arrival_mode == "trace"),
+        # trace / sequential modes use synthetic prompts with token-target
+        # lengths from CSV; ignore_eos forces decode to exactly max_tokens
+        # so output length faithfully matches the trace row.
+        ignore_eos=(args.arrival_mode in ("trace", "sequential",
+                                          "trace_sampled",
+                                          "trace_sampled_burst")),
+        sequential=(args.arrival_mode == "sequential"),
     ))
     cfg.wallclock_s = round(wallclock, 3)
     cfg, joined_dicts = aggregate(records, cfg, args.slo_ttft_ms, args.slo_tpot_ms)

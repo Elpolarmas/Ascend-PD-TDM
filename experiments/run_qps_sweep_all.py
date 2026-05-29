@@ -840,6 +840,7 @@ def run_one_qps(
     trace_max_rows: int | None = None,
     trace_max_prompt_tokens: int | None = None,
     trace_max_output_tokens: int | None = None,
+    num_samples: int = 50,
     slo_ttft_ms: float = SLO_TTFT_MS,
     slo_tpot_ms: float = SLO_TPOT_MS,
 ) -> dict | None:
@@ -892,6 +893,50 @@ def run_one_qps(
             cmd.extend(["--trace-max-prompt-tokens", str(trace_max_prompt_tokens)])
         if trace_max_output_tokens is not None:
             cmd.extend(["--trace-max-output-tokens", str(trace_max_output_tokens)])
+    elif arrival_mode == "sequential":
+        if not trace_file:
+            raise ValueError(
+                "--arrival-mode=sequential requires --trace-file"
+            )
+        cmd.extend([
+            "--arrival-mode", "sequential",
+            "--trace-file", str(trace_file),
+            "--num-samples", str(num_samples),
+        ])
+        if trace_max_prompt_tokens is not None:
+            cmd.extend(["--trace-max-prompt-tokens", str(trace_max_prompt_tokens)])
+        if trace_max_output_tokens is not None:
+            cmd.extend(["--trace-max-output-tokens", str(trace_max_output_tokens)])
+    elif arrival_mode == "trace_sampled":
+        if not trace_file:
+            raise ValueError(
+                "--arrival-mode=trace_sampled requires --trace-file"
+            )
+        cmd.extend([
+            "--arrival-mode", "trace_sampled",
+            "--trace-file", str(trace_file),
+        ])
+        if trace_max_prompt_tokens is not None:
+            cmd.extend(["--trace-max-prompt-tokens", str(trace_max_prompt_tokens)])
+        if trace_max_output_tokens is not None:
+            cmd.extend(["--trace-max-output-tokens", str(trace_max_output_tokens)])
+    elif arrival_mode == "trace_sampled_burst":
+        if not trace_file:
+            raise ValueError(
+                "--arrival-mode=trace_sampled_burst requires --trace-file"
+            )
+        cmd.extend([
+            "--arrival-mode", "trace_sampled_burst",
+            "--trace-file", str(trace_file),
+            "--burst-period", str(burst_period),
+            "--burst-high-qps", str(burst_high_qps),
+            "--burst-low-qps", str(burst_low_qps),
+            "--burst-high-frac", str(burst_high_frac),
+        ])
+        if trace_max_prompt_tokens is not None:
+            cmd.extend(["--trace-max-prompt-tokens", str(trace_max_prompt_tokens)])
+        if trace_max_output_tokens is not None:
+            cmd.extend(["--trace-max-output-tokens", str(trace_max_output_tokens)])
     # c4_pd 没 server tracker，必须开 streaming 让 client 自测 TTFT/TPOT
     if config_name == "c4_pd":
         cmd.append("--stream")
@@ -934,6 +979,7 @@ def run_config(
     trace_max_rows: int | None = None,
     trace_max_prompt_tokens: int | None = None,
     trace_max_output_tokens: int | None = None,
+    num_samples: int = 50,
     slo_ttft_ms: float = SLO_TTFT_MS,
     slo_tpot_ms: float = SLO_TPOT_MS,
     slo_target_violation_rate: float | None = None,
@@ -971,6 +1017,7 @@ def run_config(
                             trace_max_rows=trace_max_rows,
                             trace_max_prompt_tokens=trace_max_prompt_tokens,
                             trace_max_output_tokens=trace_max_output_tokens,
+                            num_samples=num_samples,
                             slo_ttft_ms=slo_ttft_ms,
                             slo_tpot_ms=slo_tpot_ms)
             if s is not None:
@@ -1029,8 +1076,18 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=0,
                         help="Workload generation seed (passed to qps_sweep.py)")
     parser.add_argument("--arrival-mode",
-                        choices=["poisson", "burst", "trace"],
-                        default="poisson")
+                        choices=["poisson", "burst", "trace", "sequential",
+                                 "trace_sampled", "trace_sampled_burst"],
+                        default="poisson",
+                        help="sequential = concurrent=1 micro-benchmark "
+                             "(samples --num-samples rows from --trace-file, "
+                             "qps_points forced to [0.0]). "
+                             "trace_sampled = Poisson arrival at --qps with "
+                             "lengths sampled from --trace-file (Phase 1 T5). "
+                             "trace_sampled_burst = burst arrival (burst-* "
+                             "params) + lengths from --trace-file (Phase 1 T5b).")
+    parser.add_argument("--num-samples", type=int, default=50,
+                        help="Number of samples for --arrival-mode=sequential.")
     parser.add_argument("--burst-period", type=float, default=10.0)
     parser.add_argument("--burst-high-qps", type=float, default=64.0)
     parser.add_argument("--burst-low-qps", type=float, default=4.0)
@@ -1054,6 +1111,21 @@ def main() -> int:
         configs = ["c1_baseline"]
         qps_points = [2.0]
         duration_s, warmup_s = 20.0, 0.0
+    elif args.arrival_mode == "sequential":
+        # Sequential mode = concurrent=1 micro-benchmark, no QPS sweep.
+        # Single "qps=0" run per config; duration semantics flipped to
+        # request-count (set in qps_sweep.py via --num-samples).
+        configs = [c.strip() for c in args.configs.split(",") if c.strip()]
+        qps_points = [0.0]
+        duration_s = args.duration
+        warmup_s = args.warmup
+    elif args.arrival_mode == "trace_sampled_burst":
+        # Burst mode: qps controlled by --burst-* params, not qps_points.
+        # Force qps_points = [0.0] (single run per config).
+        configs = [c.strip() for c in args.configs.split(",") if c.strip()]
+        qps_points = [0.0]
+        duration_s = args.duration
+        warmup_s = args.warmup
     else:
         configs = [c.strip() for c in args.configs.split(",") if c.strip()]
         qps_points = ([float(x) for x in args.qps.split(",")]
@@ -1116,6 +1188,7 @@ def main() -> int:
             trace_max_rows=args.trace_max_rows,
             trace_max_prompt_tokens=args.trace_max_prompt_tokens,
             trace_max_output_tokens=args.trace_max_output_tokens,
+            num_samples=args.num_samples,
             slo_ttft_ms=args.slo_ttft_ms,
             slo_tpot_ms=args.slo_tpot_ms,
             slo_target_violation_rate=args.slo_target_violation_rate,

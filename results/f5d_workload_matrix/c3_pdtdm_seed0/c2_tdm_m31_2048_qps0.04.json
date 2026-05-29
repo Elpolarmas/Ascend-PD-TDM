@@ -1,0 +1,192 @@
+{
+  "summary": {
+    "config_name": "c2_tdm_m31_2048",
+    "workload_name": "poisson_qps0.04_dur180s",
+    "qps_target": 0.04,
+    "duration_s": 180.0,
+    "warmup_s": 30.0,
+    "base_url": "http://127.0.0.1:8000",
+    "model": "/vllm-workspace/models/models/Qwen3-8B",
+    "tracker_jsonl": "/vllm-workspace/Ascend-PD-TDM/results/tdm_trace/qps_sweep_c2_tdm_m31_2048_req.jsonl",
+    "n_submitted": 5,
+    "n_ok": 4,
+    "n_err": 1,
+    "wallclock_s": 236.05,
+    "qps_actual_arrival": 0.028,
+    "window": {
+      "window_s": [
+        30.0,
+        180.0
+      ],
+      "n_in_window": 5,
+      "n_ok": 4,
+      "n_matched": 4,
+      "n_unmatched": 0,
+      "n_meet_slo": 4,
+      "ttft_ms": {
+        "mean": 55.525,
+        "p50": 51.948,
+        "p99": 90.806,
+        "min": 39.026,
+        "max": 90.806
+      },
+      "tpot_ms_mean": {
+        "mean": 23.595,
+        "p50": 23.702,
+        "p99": 23.835,
+        "min": 23.362,
+        "max": 23.835
+      },
+      "e2e_ms": {
+        "mean": 79741.851,
+        "p50": 79888.258,
+        "p99": 89883.963,
+        "min": 71225.888,
+        "max": 89883.963
+      },
+      "output_throughput_tok_s": 90.02,
+      "goodput_tok_s": 90.02,
+      "slo_ttft_ms": 500.0,
+      "slo_tpot_ms": 200.0
+    }
+  },
+  "joined": [
+    {
+      "req_id": "syn-0-000002",
+      "arrival_time_s": 96.53296847170668,
+      "server_req_id": null,
+      "status": 400,
+      "e2e_ms": null,
+      "ttft_ms": null,
+      "tpot_ms_mean": null,
+      "tpot_ms_p99": null,
+      "prompt_tokens": null,
+      "output_tokens": null,
+      "matched": false
+    },
+    {
+      "req_id": "syn-0-000000",
+      "arrival_time_s": 46.51517777663058,
+      "server_req_id": "cmpl-4a5cf41f39d04a0da282f427da999dc5",
+      "status": 200,
+      "e2e_ms": 71225.888,
+      "ttft_ms": 90.80640602111816,
+      "tpot_ms_mean": 23.479930261639655,
+      "tpot_ms_p99": 31.16606330871582,
+      "prompt_tokens": 321,
+      "output_tokens": 3029,
+      "matched": true
+    },
+    {
+      "req_id": "syn-0-000001",
+      "arrival_time_s": 58.28843611671633,
+      "server_req_id": "cmpl-5819c539e9d747129abd533a4c1cfb93",
+      "status": 200,
+      "e2e_ms": 77969.293,
+      "ttft_ms": 39.026004791259766,
+      "tpot_ms_mean": 23.83501342869155,
+      "tpot_ms_p99": 31.935001373291016,
+      "prompt_tokens": 223,
+      "output_tokens": 3269,
+      "matched": true
+    },
+    {
+      "req_id": "syn-0-000003",
+      "arrival_time_s": 131.35224412298234,
+      "server_req_id": "cmpl-1d03a0fd54534231a65ccb8ca79187e8",
+      "status": 200,
+      "e2e_ms": 89883.963,
+      "ttft_ms": 40.32016944885254,
+      "tpot_ms_mean": 23.701676663274874,
+      "tpot_ms_p99": 31.726612091064453,
+      "prompt_tokens": 229,
+      "output_tokens": 3789,
+      "matched": true
+    },
+    {
+      "req_id": "syn-0-000004",
+      "arrival_time_s": 156.14035739235538,
+      "server_req_id": "cmpl-4ebf0a1279414305bb45df7bd013e4cc",
+      "status": 200,
+      "e2e_ms": 79888.258,
+      "ttft_ms": 51.947566986083984,
+      "tpot_ms_mean": 23.36238862815399,
+      "tpot_ms_p99": 31.659605026245117,
+      "prompt_tokens": 371,
+      "output_tokens": 3416,
+      "matched": true
+    }
+  ],
+  "client_records": [
+    {
+      "req_id": "syn-0-000002",
+      "arrival_time_s": 96.53296847170668,
+      "submit_ts": 15462065.391145013,
+      "finish_ts": 15462065.426014911,
+      "status": 400,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "server_req_id": null,
+      "error": "{\"error\":{\"message\":\"This model's maximum context length is 0 tokens. However, your request has 302 input tokens. Please reduce the length of the input messages.\",\"type\":\"BadRequestError\",\"param\":null",
+      "client_ttft_ms": null,
+      "client_tpot_ms_mean": null,
+      "client_n_chunks": null
+    },
+    {
+      "req_id": "syn-0-000000",
+      "arrival_time_s": 46.51517777663058,
+      "submit_ts": 15462015.363126092,
+      "finish_ts": 15462086.589013819,
+      "status": 200,
+      "prompt_tokens": 321,
+      "completion_tokens": 3029,
+      "server_req_id": "cmpl-4a5cf41f39d04a0da282f427da999dc5",
+      "error": null,
+      "client_ttft_ms": null,
+      "client_tpot_ms_mean": null,
+      "client_n_chunks": null
+    },
+    {
+      "req_id": "syn-0-000001",
+      "arrival_time_s": 58.28843611671633,
+      "submit_ts": 15462027.116231453,
+      "finish_ts": 15462105.08552444,
+      "status": 200,
+      "prompt_tokens": 223,
+      "completion_tokens": 3269,
+      "server_req_id": "cmpl-5819c539e9d747129abd533a4c1cfb93",
+      "error": null,
+      "client_ttft_ms": null,
+      "client_tpot_ms_mean": null,
+      "client_n_chunks": null
+    },
+    {
+      "req_id": "syn-0-000003",
+      "arrival_time_s": 131.35224412298234,
+      "submit_ts": 15462100.185980204,
+      "finish_ts": 15462190.06994338,
+      "status": 200,
+      "prompt_tokens": 229,
+      "completion_tokens": 3789,
+      "server_req_id": "cmpl-1d03a0fd54534231a65ccb8ca79187e8",
+      "error": null,
+      "client_ttft_ms": null,
+      "client_tpot_ms_mean": null,
+      "client_n_chunks": null
+    },
+    {
+      "req_id": "syn-0-000004",
+      "arrival_time_s": 156.14035739235538,
+      "submit_ts": 15462124.980935901,
+      "finish_ts": 15462204.869194368,
+      "status": 200,
+      "prompt_tokens": 371,
+      "completion_tokens": 3416,
+      "server_req_id": "cmpl-4ebf0a1279414305bb45df7bd013e4cc",
+      "error": null,
+      "client_ttft_ms": null,
+      "client_tpot_ms_mean": null,
+      "client_n_chunks": null
+    }
+  ]
+}

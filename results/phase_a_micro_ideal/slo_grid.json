@@ -1,0 +1,153 @@
+{
+  "model": "Qwen3-8B",
+  "concurrent": 1,
+  "method": "sequential micro-benchmark, Sarathi-Serve protocol",
+  "slo_multipliers": [
+    5,
+    10,
+    15,
+    25
+  ],
+  "workloads": {
+    "conv": {
+      "workload": "conv",
+      "n_seeds": 3,
+      "n_total_records": 150,
+      "n_kept_after_warmup_and_status": 135,
+      "warmup_reqs_dropped_per_seed": 5,
+      "prompt_tokens": {
+        "n": 135,
+        "mean": 1029.34,
+        "p50": 1022.0,
+        "p90": 2177.2,
+        "p99": 4201.66,
+        "min": 15.0,
+        "max": 5088.0
+      },
+      "output_tokens": {
+        "n": 135,
+        "mean": 207.79,
+        "p50": 124.0,
+        "p90": 433.0,
+        "p99": 567.92,
+        "min": 12.0,
+        "max": 575.0
+      },
+      "ideal_ttft_ms": {
+        "n": 135,
+        "mean": 108.73,
+        "p50": 101.23,
+        "p90": 201.38,
+        "p99": 415.15,
+        "min": 30.0,
+        "max": 501.21
+      },
+      "ideal_tpot_ms_mean": {
+        "n": 135,
+        "mean": 21.61,
+        "p50": 21.73,
+        "p90": 22.8,
+        "p99": 23.36,
+        "min": 19.49,
+        "max": 23.45
+      },
+      "ideal_e2e_ms": {
+        "n": 135,
+        "mean": 4577.48,
+        "p50": 2632.35,
+        "p90": 9560.9,
+        "p99": 11859.41,
+        "min": 271.93,
+        "max": 12608.04
+      },
+      "slo_grid": {
+        "5x": {
+          "slo_ttft_ms": 2075.8,
+          "slo_tpot_ms": 116.8
+        },
+        "10x": {
+          "slo_ttft_ms": 4151.5,
+          "slo_tpot_ms": 233.6
+        },
+        "15x": {
+          "slo_ttft_ms": 6227.2,
+          "slo_tpot_ms": 350.4
+        },
+        "25x": {
+          "slo_ttft_ms": 10378.8,
+          "slo_tpot_ms": 584.0
+        }
+      }
+    },
+    "code": {
+      "workload": "code",
+      "n_seeds": 3,
+      "n_total_records": 150,
+      "n_kept_after_warmup_and_status": 135,
+      "warmup_reqs_dropped_per_seed": 5,
+      "prompt_tokens": {
+        "n": 135,
+        "mean": 1764.07,
+        "p50": 1598.0,
+        "p90": 3619.8,
+        "p99": 6275.24,
+        "min": 27.0,
+        "max": 6686.0
+      },
+      "output_tokens": {
+        "n": 135,
+        "mean": 29.5,
+        "p50": 14.0,
+        "p90": 61.0,
+        "p99": 193.96,
+        "min": 6.0,
+        "max": 204.0
+      },
+      "ideal_ttft_ms": {
+        "n": 135,
+        "mean": 174.45,
+        "p50": 145.81,
+        "p90": 344.42,
+        "p99": 683.51,
+        "min": 29.9,
+        "max": 724.64
+      },
+      "ideal_tpot_ms_mean": {
+        "n": 135,
+        "mean": 21.74,
+        "p50": 21.67,
+        "p90": 23.94,
+        "p99": 24.86,
+        "min": 18.96,
+        "max": 25.37
+      },
+      "ideal_e2e_ms": {
+        "n": 135,
+        "mean": 814.88,
+        "p50": 516.43,
+        "p90": 1615.47,
+        "p99": 4334.19,
+        "min": 158.04,
+        "max": 4579.4
+      },
+      "slo_grid": {
+        "5x": {
+          "slo_ttft_ms": 3417.6,
+          "slo_tpot_ms": 124.3
+        },
+        "10x": {
+          "slo_ttft_ms": 6835.1,
+          "slo_tpot_ms": 248.6
+        },
+        "15x": {
+          "slo_ttft_ms": 10252.6,
+          "slo_tpot_ms": 372.9
+        },
+        "25x": {
+          "slo_ttft_ms": 17087.8,
+          "slo_tpot_ms": 621.5
+        }
+      }
+    }
+  }
+}

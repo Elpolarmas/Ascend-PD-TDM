@@ -6,6 +6,410 @@
 
 ---
 
+## D-015(2026-05-26)导师汇报 3 challenges + first-principles 辩护 + F0+ 升 P0 / F5 降 P1
+
+**状态:active(2026-05-26)**
+
+- **触发:**
+  - 5/26 mentor 汇报回来,老师对 PD-TDM 提出 3 个核心质疑(原话):
+    1. **逻辑漏洞**:chunked prefill 本身就是要减少 prefill 对 decode 干扰才做混合 batch + 优先 decode;PD-TDM 把 prefill / decode 拆开,等于又回到 prefill 干扰 decode,直觉上更差 — 凭什么反而好?
+    2. **负载偏置**:实验优势是否特定于数据集(prefill 长 decode 短)?是否要构造 decode-heavy 工作负载先确认不是负载特性带来的
+    3. **prior art**:TDM 这种思想很简单(除 SLO 优化),P/D 时分复用机制有没有别的工作做过?(用户自行 web search,不在我的任务里)
+
+- **关于 challenge 2(负载偏置)— 实测 trace token 分布,确认老师质疑成立:**
+  | Trace | ContextTokens mean / median / p90 | GeneratedTokens mean / median / p90 |
+  |---|---|---|
+  | conv | 1155 / 1020 / 2735 | **211 / 129 / 424** |
+  | code | 2048 / 1469 / 5194 | **28 / 13 / 55** |
+  - conv prompt:output ≈ 5×,code prompt:output ≈ 73× — **两个 Azure trace 都是 prefill-leaning**,不存在真正 decode-heavy regime
+  - 之前底稿口头说 "conv 输入输出差不多" 是错的,要在 paper §5 Caveat 明写 "当前 4-way 结果只覆盖 prefill-leaning regime;decode-heavy 情形未验证"
+
+- **关于 challenge 1(逻辑漏洞)— 三柱 first-principles 辩护(待 F0+ kernel telemetry 实证):**
+  1. **chunk_budget 才是 Sarathi 真正止血机制,"同 batch 混合" 不是**
+     - Sarathi OSDI'24 Fig.7 自己也承认:chunk_size 从 ∞ 降到 2048 带来 TPOT 改善占绝大部分;混合 batch 在 chunk 限到 2048 后边际贡献很小
+     - PD-TDM 保留 chunk_budget=2048(D-006),只是把"混合"换成"phase-pure" → Sarathi 防 stall 的核心机制我们继承,没丢
+  2. **混合 batch 在 NPU 上有 variable-query-length 税**
+     - 混合 iter 的 attention call 里 query_len = `[chunk_size, 1, 1, ..., 1]` 极不均匀
+     - 910B3 attention kernel 对变长 query 支持不像 GPU FlashAttn 便宜,触发 padding / 多次 kernel launch / sub-optimal tiling
+     - c3 telemetry(5/25)实测 mixed iter 220ms vs PD-TDM phase-pure prefill 150ms + decode 39ms = cycle 189ms,差额 ~70ms 即 mixed batch tax
+  3. **decode "等待时间" ≠ "P iter 时长",要看 selector 节奏 + kernel 满血**
+     - Sarathi 每个 iter 220ms,decode 一直被 P 拖
+     - PD-TDM 在 P iter 时 decode 等 ~150ms,但 D iter 时 decode kernel 满血(pure decode = 39ms vs mixed 含 decode ~80ms),平均 TPOT 反而更优
+  - **类比**:洗衣 + 洗碗放一锅煮 vs 分开洗,后者更快 — 因为水温/清洁剂/转速各自最优。LLM 中 P (compute-bound)/ D (memory-bound) 硬件最优工作点不同,强行混在一个 attention call 反而双输
+
+- **F0+ kernel/iter cost breakdown 升 P0(原 F0 Vanilla CB telemetry 补救合并):**
+  - 目标:直接实证三柱辩护第 2 柱 — 把 mixed iter 和 phase-pure iter 的 attention kernel 耗时拆出 `variable_query_length_overhead` 这一项
+  - 现状:D-013 patch 已给 iter-level 计时(c3 telemetry / m31 telemetry 各 1 cell);可能不需要重跑,只需要重新解析现有 JSON + 加 kernel-level 拆分(如果 telemetry granularity 不够再补 cell)
+  - 输出:数字形如 "NPU mixed iter 有 ~15-20% variable-query overhead,phase-pure 省掉这部分"
+  - 优先级 reason:**决定性**(直接验证 / 推翻 first-principles 模型)+ **便宜**(可能 0 新 run)+ **paper 武器**(mechanism-level evidence 比 workload sweep 难反驳)
+
+- **F5 decode-heavy synthetic sweep 降 P1(从 P0 调整):**
+  - 原计划:`synth_decode_heavy`(prompt 64-128, output 1024-2048)+ `synth_balanced` + `synth_prefill_heavy`,3 paradigm × 12 run × 3 wl ≈ 36 cell,T6 1 晚跑完
+  - 降级理由:即使 decode-heavy 上 PD-TDM 赢,也不解释**为什么** — 老师下一句还是"凭什么不混合反而好",逻辑漏洞没补;**必须先 F0+ 把 mechanism 钉住再做 scope 验证**
+  - 顺序:F0+ 出结果后,根据 first-principles 模型预测 decode-heavy 表现 → F5 验证或推翻预测 → paper §5.3 收紧 scope claim
+  - 决策点:**如果 F0+ 数据显示 variable-query overhead 其实很小(<5%),first-principles 模型不成立 → 立即停 F5,回到机制重新找;不要花 1 晚验证一个错的预测**
+
+- **paper 写作影响:**
+  - §3 性能分析:把现在的 "cycle time 模型" 换成三柱 first-principles 框架(待 F0+ 实证后定稿)
+  - §5 Caveat:加 "Azure conv/code 都是 prefill-leaning(实测 mean prompt/output ratio = 5× / 73×)→ decode-heavy regime 未验证";F5 跑完后根据结果再收紧或放宽
+  - §3.1 motivation 重排:**承认 Sarathi 混合 batch + decode 优先是 GPU 上的最优解,我们的贡献是"NPU 上 variable-query 税 + cycle 长度差异让 phase-pure 反超"** — 不要否定 Sarathi 在 GPU 上的成功
+  - §2 related work:等用户 web search 反馈 prior art,确认无前作 / 区分 contribution(challenge 3)
+
+- **跟进事项 ranking(更新自 D-014):**
+  - **P0**: F0+(kernel/iter cost breakdown)— 解析 c3 / m31 telemetry,拆 variable-query overhead;1-2 天
+  - **P1**: F5(decode-heavy synthetic sweep)— 等 F0+ 后跑;1 晚 wall
+  - **P1**: prior art 调研(user 自行 web search)— 决定 §2 related work + §1 differentiation
+  - **P2**: L3 real Azure trace(phase 2 计划内,长 wall)
+  - **P3**: phase_iters semantic bug fix(D-013 残留,不影响数据)
+
+- **影响文档:**
+  - `README.md`:加 D-015 到历史决策,跟进事项 ranking 更新
+  - `FINDINGS.md`:加 Azure trace token 分布实测块
+  - `MENTOR_DISCUSSION.md`:§3 性能分析待 F0+ 后重写,§5 Caveat 加 prefill-leaning 限定
+
+- **Supersedes:**
+  - D-014 跟进事项 F5(decode-heavy)P0 → P1
+  - D-014 跟进事项 F0(Vanilla CB telemetry 补救)合并到 F0+(kernel cost breakdown)
+
+---
+
+## D-014(2026-05-26)Baseline 重定位:c1 → Vanilla CB(老 c3 chunk=8192)+ NPU 复现 Sarathi finding + 短 prompt 反例
+
+**状态:active(2026-05-26 finalize)**
+
+- **触发:**
+  - 5/26 准备 mentor 汇报底稿时质疑 c1 命名 — 文献意义 "vanilla CB" 通常指 mixed batch(prefill+decode 同 batch),Sarathi 论文比较的就是这个;但我们的 c1(vllm-ascend AscendScheduler default + `chunked_prefill_enabled=False`)实际是 admit-driven phase-pure(单 iter 单 phase),**跟主流文献 vanilla CB 不是同一种 design**
+  - 用户提醒早期 T6 sweep 跑的 c3 用 `chunked_prefill_enabled=True` + `max_num_batched_tokens=8192`,数据保存在 `results/phase_2_t6_burst_goodput/*_nonpid/c3_cp_qps0.0.json`(42 dirs × 3 seeds);Azure trace prompt cap=7000 < 8192 → chunk 实际不触发 = **mixed batch + 长 prompt 整 iter 一次跑完**,**真正的 vanilla CB equivalent**
+  - 这些数据 D-013 期间被 framing 成 "c3 unfair 版本",换成 chunk=2048 的 c3-fair 作 fair baseline;**实际上两者关系不是 "fair vs unfair",是 "vanilla CB vs Sarathi chunked prefill"**
+
+- **修订:**
+  - **Baseline 重命名 + 数据源映射:**
+    | Paper 名 | 原 config 名 | 数据源 |
+    |---|---|---|
+    | **Vanilla CB**(主流文献 baseline) | 老 c3 (`c3_cp` + chunk=8192) | `phase_2_t6_burst_goodput/*_nonpid/c3_cp_qps0.0.json` |
+    | **Sarathi chunked prefill**(主流文献 baseline) | c3-fair (`c3_cp` + chunk=2048) | `c3_chunk2048_supplement/` |
+    | **PD-TDM**(本工作) | m31-fix (`c2_tdm_m31_2048_fix`) | `m31fix_validate/` |
+    | c4_pd 1P1D disagg(reference) | 不变 | `c4_pd_supplement/` |
+  - **c1(原 vllm-ascend default phase-pure)从 paper 主线 baseline 移除** — 它在 LLM serving 文献里没有标准命名,是 NPU-specific niche design,容易引起 reviewer 困惑。代码 / 数据保留,paper 不报
+  - aggregate JSON `m31fix_phase1_pointwise.json` 加 `vanilla_cb` config 列(`posthoc_m31fix_phase1.py` 改:加 `CONFIG_VCB = "vanilla_cb"` + path resolver 指向 nonpid 目录的 `c3_cp_qps0.0.json`)
+  - paper 主图:`plot_paper_main_figures.py` PARADIGMS_4WAY 把 `c1_baseline` 换成 `vanilla_cb`;新加两个 heatmap function:F2b(PD-TDM vs Vanilla CB 总优势)、F2c(Sarathi vs Vanilla CB NPU 复现 + 反例视觉证据);共出 18 张 PNG(6 Pareto × 2 variant + 3 heatmap × 2 variant)
+
+- **NPU 上首次复现 Sarathi 论文 OSDI'24 核心 finding(F2c heatmap 实测,3-seed median Δ pp = Sarathi − Vanilla CB):**
+  ```
+  conv s1:  -6.2  -6.5  -6.2  -3.5  -1.6  -0.5  +1.1
+  conv s2:  +1.2  -3.0  +2.4 +10.1 +14.6 +17.8 +22.6
+  conv s3:  -5.2  -2.0  +1.2 +12.9 +24.9 +26.2 +34.9
+  code s1: +13.0 +22.4  -1.1  +1.7  +0.9  +1.1  +5.5
+  code s2: +16.3 +43.6 +61.6 +70.6 +74.5 +75.2 +74.8
+  code s3:  +0.6  +7.1 +32.5 +87.5 +80.0 +80.6 +80.6
+  ```
+  - **code workload(长 prompt)上 Sarathi 大胜 Vanilla CB**:max +88pp(code 2.8 s3)— **NPU 上首次直接量化 chunked prefill 把长 prompt 灾难救活的 finding**
+  - **conv s1 / s3 低 k 上 Sarathi 反输 Vanilla CB(-2 ~ -6.5pp)**:**fresh finding**,Sarathi 论文没明示 — 短 prompt 在 chunk=8192 整 iter 一次跑完 ttft 更快,chunk=2048 切多份反向拖慢首 token
+
+- **PD-TDM 跟两个 baseline 关系明确化(F2 + F2b heatmap):**
+  - **vs Sarathi(F2,unique contribution)**:phase-pure variant of chunked prefill,strict SLO 上 +30~+77pp 增益
+  - **vs Vanilla CB(F2b,总优势)**:NPU 复现 Sarathi 部分 + phase-pure 额外增益的总和,全谱完胜,max +87.5pp(code 2.8 s3)
+  - **paper 须明确归 credit 给 Sarathi 的 chunk 上限设计**(vs Vanilla CB 的胜利绝大部分来自 chunked prefill,**不能 claim 是 PD-TDM 独占**);PD-TDM 真正独占的 contribution = chunked prefill 内部 phase-pure 的额外增益(F2)
+
+- **数据无须新跑,iter telemetry 待小补:**
+  - Vanilla CB paradigm-level 数据完整可用(42 cells × 3 seeds,跟 c1 同 sweep 一起跑的)
+  - **Vanilla CB iter telemetry 缺**(D-013 patch 是 5/25 加的,老 c3 是 5/22 跑的) — 待 F0 补救(~30min wall,1-3 cell 用 D-013 patch 重跑)
+  - **当前已可重画 18 张 PNG**(`posthoc_m31fix_phase1.py` + `plot_paper_main_figures.py --variant {3way,4way}` 已修),paradigm-level Pareto / heatmap 全部 ready
+
+- **影响文档:**
+  - `README.md`:当前状态 + thesis 版本 + Outdir 段说明 vanilla_cb 数据源
+  - `T6_FINDINGS.md`:§"c3 vs c1 baseline 复现" 整段重写为 "Vanilla CB vs Sarathi" + NPU 复现 finding + 短 prompt 反例
+  - `FINDINGS.md`:加 D-014 finding 块
+  - `EXPERIMENTS.md`:paradigm 命名表更新 + Vanilla CB 数据源指向
+  - `PROJECT.md` §2.4 baseline 列表:c1 移除,Vanilla CB 加入
+
+- **影响代码:**
+  - `experiments/posthoc_m31fix_phase1.py`:加 `CONFIG_VCB`,_path_for / ALL_CONFIGS / SHORT 都加 vanilla_cb
+  - `experiments/plot_paper_main_figures.py`:PARADIGMS_4WAY 把 c1_baseline 换 vanilla_cb;加 `plot_advantage_heatmap_vs_vanilla` + `plot_sarathi_vs_vanilla_heatmap`(F2b / F2c);共出 9 个 figure × 2 variant = 18 PNG
+
+- **影响范围 / 不能偏离的原则更新:**
+  - **D-011 原 §4 "对手 = 4-way paradigm comparison" baseline 命名更新**:C1/C3/M3.1/c4_pd → Vanilla CB / Sarathi / PD-TDM / c4_pd
+  - 新加一条:**Paper baseline 命名必须跟主流 LLM serving 文献对应**(Vanilla CB / Sarathi chunked prefill 都是文献术语,c1 这种 NPU-specific 命名不再用)
+  - 新加一条:**NPU 复现 Sarathi finding + 短 prompt 反例**作为 paper §3.1 motivation 实证 + §5.3 caveat fresh finding
+
+- **跟进事项:**
+  - F0(P0+,~30min wall):Vanilla CB iter telemetry 补救(1-3 cell × D-013 patch 后 scheduler 重跑,关闭 §4.1 单步实测表 "待补 telemetry" 标签)
+  - 其它跟进 F1-F4 见 D-013 / MENTOR_DISCUSSION.md §7
+
+- **Supersedes:**
+  - D-013 §"c3 vs c1 baseline 复现(部分)" framing:**改成 Sarathi vs Vanilla CB 基准对照**;原 "conv strict 上 c3 反输 c1" caveat 实际是 NPU c1 特有现象,**主线 baseline 切换后该 caveat 不再适用**
+  - D-013 paper 主线 4-way baseline(C1/C3/M3.1/c4_pd)→ D-014 重定位为 4-way(Vanilla CB / Sarathi / PD-TDM / c4_pd)
+
+---
+
+## D-013(2026-05-24 启动 / 2026-05-25 finalize)chunked_schedule bug fix + Phase 1 全 m31 重跑 + 机制 review
+
+**状态:active(5/25 Phase 1 数据 finalize + 机制 telemetry verify)**
+
+- **触发:**
+  - 5/23 LONG_PROMPT_SMOKE 跑完得"决定性 negative result":m31 在 long-prompt code 上 0%~67.8% meet 而 c3-fair 100% meet
+  - 5/24 用户质疑 chunk 配置(m31 cmdline 8192 vs c3 cmdline 2048),deeper 挖发现 m31 内部 `prefill_chunk_tokens=2048` 实际硬 cap,两者 chunk granularity 实际相同
+  - 进一步看 iter trace 发现 **277/1073 个 "decode" iter 实际跑 prefill chunk(reqs=1, tokens=2048)而 0 decode 输出**
+  - 跟踪到 `chunked_schedule.py` waiting loop 没 gate 在 phase,decode iter 偷塞 prefill 但因 L396 `len(scheduled_req_ids)==0` 判断 skip decode loop → 双输
+
+- **修复:**
+  - `vllm-ascend/vllm_ascend/core/tdm/chunked_schedule.py` L194 waiting loop while 改:
+    ```python
+    while (self.phase == "prefill" and self.waiting
+           and token_budget > 0 and chunk_budget > 0):
+    ```
+  - 注释为 Diff #6,引用 design intent comment(L13, L120-125)证明这是漏写不是 design choice
+
+- **修复验证(5 cell × 3 seed critical scan):**
+  - long_prompt code @ (1000/500):0% → 100% meet,gp +19% vs c3-fair
+  - T6 code k1.4 s2:bug -9pp → fix +1pp(swing +10pp)
+  - T6 code k1.4 s3:bug -12pp → fix 0pp tied(swing +12pp)
+  - T6 conv k1.4 s1:bug +27pp / fix +27pp(strict TTFT m31 winning regime 不变,大幅胜)
+  - T6 conv k1.4 s3:bug +3.9pp / fix +2.7pp(基本不变,bug 在短 prompt 影响小)
+  - **结论:m31-fix 在测过 5 cell 上全部 ≥ c3-fair,无 cell 输**
+
+- **memo 数字校正(T6_FINDINGS 普遍夸大):**
+  - "code s3 -43pp 最戏剧" → 实测 -12pp(夸大 3.5×)
+  - "code s2 -23pp" → 实测 -9pp(夸大 2.5×)
+  - "conv s3 tied" → 实测 +3.9pp(已是微赢)
+  - "code s4 -8pp" → 实测 0pp tied
+  - 三个文档(T6_FINDINGS / LONG_PROMPT_SMOKE / mech_brainstorm)5/24 已加 SUPERSEDED 头
+
+- **数据 invalidate:**
+  - T6 `phase_2_t6_burst_goodput/*_pid` 168 个 m31 cells 全废
+  - `azure_m31_fia_ablation/` kernel ablation 6 cells 也带 bug(若需要再重跑)
+  - c1/c3 数据不受影响,复用
+
+---
+
+### Phase 1 sweep 完成(2026-05-25 01:31:54 UTC)
+
+- script `/tmp/run_m31fix_phase1.sh`,log `/tmp/m31fix_phase1.log`,output `results/m31fix_validate/`
+- 实测 129 cells(126 标准 matrix + 3 carryover),0 失败 run
+- post-hoc 脚本:`experiments/posthoc_m31fix_phase1.py`
+- 聚合数据:`results/phase_2_post/m31fix_phase1_pointwise.json`
+
+---
+
+### Phase 1 结果 — Paradigm-level winning region(m31-fix vs c3-fair,3-seed median)
+
+**conv 21/21 全胜**(12 decisive +5pp ↑ / 9 small win;0 tie / 0 loss)
+
+| SLO | k=0.5 | k=1.0 | k=1.4 | k=1.8 | k=2.2 | k=2.6 | k=3.0 |
+|---|---|---|---|---|---|---|---|
+| s1 200/120 | +9.9pp | +23.8 | +26.7 | +28.3 | +30.5 | +30.9 | **+34.8** |
+| s2 300/150 | +2.8 | +7.2 | +3.0 | +7.0 | +6.4 | +5.3 | +6.3 |
+| s3 500/200 | +4.0 | +2.3 | +3.3 | +2.6 | +2.2 | +2.5 | +1.9 |
+
+**code 9 decisive / 11 tied / 1 noise loss**(strict 大胜,mid/loose 撞 saturation ceiling)
+
+| SLO | k=0.7 | k=1.4 | k=2.1 | k=2.8 | k=3.5 | k=4.2 | k=4.9 |
+|---|---|---|---|---|---|---|---|
+| s1 500/200 | +12.3pp | +27.9 | **+71.5** | **+77.8** | **+77.2** | **+77.4** | **+73.9** |
+| s2 500/700 | +2.5 | +0.6 | +2.1 | 0.0 | +0.6 | +0.6 | +0.9 |
+| s3 2000/400 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0 | 0.0(都 100%) |
+
+**Goodput**(m31-fix vs c3-fair Δ tok/s):conv s1 k=3.0 时 +1870;code s1 k=4.9 时 +351。
+
+**Latency 全维度 m31 胜**(winner count tally,21 cells × 6 metric):
+- conv:m31 ttft_mean 20/21,ttft_p99 17/21,tpot_p99 20/21;c3 拿 0;c1 只 ttft_p99 偶 2 cell
+- code:m31 ttft/tpot mean/p99 **4 维全 21/21**(c3/c1 在任一 latency metric 上 0 wins)
+
+### Phase 1 结果 — Thesis 修正
+
+**原 D-012 framing**:"deliberately trades tail latency for mean latency to maximize goodput"
+**Phase 1 数据不支持**:m31 不仅 mean 比 c3 低,**tail (p99) 也全程低**(code tpot_p99 c3=228ms 稳定 vs m31=190ms;ttft_p99 c3=900 vs m31=720)。**mean 和 tail 同时改善,不是 trade-off**。
+
+**修正后的 framing(待 paper 落定):**
+> Phase-pure temporal multiplexing 把 mixed-batch 的"持续低幅 prefill-decode 干扰"替换为"集中高效的 phase-specific batch"。一个 cycle (prefill_iter + decode_iter) 时间(实测 189ms)**短于** c3 单 mixed iter 时间(实测 ~225ms),差距来自消除 mixed-attention overhead(varlen attention with mixed query lengths 的 kernel 路径 overhead)。
+>
+> mean 和 tail 同步改善的根因:cycle 时间分母变小了,不是"trade-off"。
+
+**Caveat(paper 须讲清):**
+- 此结论限定 Azure burst trace + Qwen3-8B + 2-NPU + chunk_budget=2048
+- 极重 prefill demand regime 下(如长 prompt + 高频 burst),m31 cycle 退化为"多 prefill iter + 1 decode iter",cycle 时间变长,**trade-off 此时会重新暴露** — 当前 burst regime 没触发(实测 phase run length 都 ≈ 1 iter)
+
+---
+
+### Phase 1 结果 — Telemetry 机制 verify(code k2.8 s1 cell)
+
+**m31 实际 phase 行为**(window 5-90s,898 iters):
+- prefill iter:n=449,mean 150ms,batch_num_tokens 永远 2048,batch_num_reqs mean 2.16 max 6
+- decode iter:n=449,mean 39ms,batch_num_reqs mean 29 max 40
+- **严格 1:1 alternation**(每 phase run = 1 iter,burst 满负载下)
+- decode-iter inter-arrival p50/p99 = 189/203 ms —— 跟实测 tpot p99=190ms 一致
+
+**关键 cycle 时间对比(burst 满负载)**:
+| 系统 | 单 iter / cycle 时间 |
+|---|---|
+| c3 单 mixed iter | ~225 ms(实测 tpot p99) |
+| m31 prefill iter + decode iter cycle | 150 + 39 = **189 ms** |
+
+差 36ms / 16% → 直接解释 tpot 优势。
+
+**8 个 cell verify**(conv 全 k × s1 + code 全 k × s1 + 2 loose SLO cell):
+- 严格 1:1 仅出现在 code k2.8 s1(burst 满,waiting_depth=64 持续堆积)
+- 绝大部分 cell:1 prefill iter 后跟 84-422 个 decode iter(轻 / 中负载)
+- 实际 ratio 由 **"有没有 prefill 待消化"** 驱动,不由 PID target 驱动
+
+---
+
+### Phase 1 结果 — PID 不是优势来源
+
+- PID 把 target_ratio 推到 ratio_max=0.8 撞顶,但**实际 prefill iter 占比 12-50%** 由 waiting queue 状态决定
+- 8 cell 中 7 cell 都见 target_ratio 0.80 max,实际 ratio 范围 12% (conv k0.5 轻负载) 到 50% (code k2.8 burst 满)
+- ReLU 单向上推让 ratio 容易上不容易下,与 D-011 "PID 退出 paper contribution" 一致
+- **paper 报 m31 = static ratio per workload,PID 不进 contribution**(D-011 + D-012 立场不变)
+
+---
+
+### Phase 1 结果 — 配置 fairness 确认
+
+| config | server max_num_batched_tokens | 内部 chunk 限制 | 单 iter 最大 prefill |
+|---|---|---|---|
+| c1 | 8192 | 无 | 8192(unified,no chunking;> 8192 prompt reject) |
+| c3 | **2048** | 无(chunk = budget) | 2048(chunked prefill,prefill chunk + decode 共享) |
+| m31 | 8192(死代码) | **chunk_budget=2048** | 2048(per iter,多 reqs 共享) |
+
+- **c3 与 m31 chunk size 完全公平(都 2048)**
+- m31 的 server budget=8192 实际**完全无效**(prefill iter 被 chunk_budget=2048 cap,decode iter 实际 ~29 token 远小于任一 cap)
+- c1=8192 是 unified 唯一合理配置;改 2048 会 reject 长 prompt(c1 没 chunked prefill 路径);"unified + chunked" design point 已被 c3 cover,**c1 无需 fairness ablation**
+- 三家配置代表三个 paradigm 的标准设计选择,non-controlled-variable 不是 unfairness
+
+---
+
+### Phase 1 结果 — c3 vs c1 baseline 复现(部分)
+
+- **code 上 c3 大幅胜 c1**:meet% Δ +14~+75pp;tpot_p99 Δ -195~-2506ms(c1 在 code 上 tpot 完全爆炸 2000-2700ms)— 符合预期
+- **conv s1/s2 低 k:c3 反而输 c1**:conv s1 c3 meet% 比 c1 -4~-19pp,ttft_p99 c3 比 c1 高 +20~+60ms
+  - 物理原因:c3 chunked prefill 把短 prompt 也分 chunk,首 token 延迟比 c1 unified 高 ~40ms
+  - 这是 chunked prefill 在短 prompt 高频负载下的弱点
+- paper 须讲清此 caveat;c3 vs c1 不是普适成立
+
+---
+
+### 发现的 code bug(Phase 1 副产物,影响有限)
+
+**phase_iters 语义 bug**(`engine.py:30-40`):
+- `apply()` 提前更新 `self._phase = candidate`,导致 `reconcile()` 比较失效
+- `phase_iters` 实际记录"controller decision 被 parent obey 的连续 iter 数",而非"当前 phase 持续 iter 数"
+- 后果:`HardConstraints.enforce()` 用 buggy phase_iters → `constraint_min_slice` 永远不触发(0%),`constraint_max_slice` 误触发 46%(但因 controller planned 通常本来就想切,无害)
+- **实际 phase 切换 100% 由 controller selector + parent_auto_flip 驱动,HardConstraints guard 实际不起作用**
+- 不影响 Phase 1 数据(guard 本来就 effectively 不存在);修复后预计行为不变,但代码正确性需要修
+
+---
+
+### 跟进事项
+
+1. **修 phase_iters 语义 bug**(代码正确性,可能不影响数据,sanity verify 一下)
+2. **m31@chunk_budget ∈ {2048, 4096, 8192} ablation sweep**:扫 chunk size sweet spot;预计 chunk 越大,burst 期 ttft 越低但 tail 越崩 —— 这能直接量化"trade tail for mean" trade-off 的边界
+3. **rewrite `T6_FINDINGS.md` / `LONG_PROMPT_SMOKE.md`**:revised conclusions 用 fix 数据
+4. **跨 workload 机制 verify**(conv 高 k 段 telemetry):确认 phase-pure 机制不只 code 特例
+5. **决定是否进 Phase 2**(Qwen3-4B 跨模型 / BurstGPT trace / mixed workload / c4_pd)
+
+---
+
+- **影响范围 / 不能偏离的原则更新:**
+  - 不动 D-011/D-012 框架(thesis 重新成立,但"trade tail for mean" framing 需修正为"phase-pure batching 让 cycle 时间变短,mean/tail 同步改善")
+  - 新加 1 条:**任何 cite m31 数据前必须确认是 fix 版**(检查 outdir 是 `m31fix_validate/` 还是旧 `phase_2_t6_burst_goodput/*_pid/`)
+  - 新加 1 条:**c3 vs c1 不普适胜出**,paper Section 5 须 explicit 讲 conv strict SLO 上 c3 输 c1 的反例
+
+---
+
+## D-012(2026-05-20)thesis 三层结构化 + goal-first framing + 双 SLO goodput + 三层实验 hierarchy
+
+- **触发:** 5/20 session 完整对比 `past_meeting/thesis_framing.md`(用户 5/19 写,L1/L2/L3 三层结构 + doc framing)跟 memory D-011 / 本 session 累积的方法学讨论(物理 framing + TPOT vs TBT + SLO 方法学),逐个 reconcile 三个 conflict:
+  1. **Conflict 1(主指标)**: 单 TPOT_p99 vs 双 SLO goodput。**用 azure_p15 已有 4-way raw p99 数据 force decision**:conv w1@1860 上 M3.1 vs C3 在 TPOT_p99 几乎打平(177 vs 175),但 TTFT_mean M3.1 比 C3 好 86ms;code w1@570 上 M3.1 TPOT_p99=1735ms 比 C3=689ms 差 2.5×。**单 p99 指标会丢失 mean 改善信号**(conv 看不到我们赢)。
+  2. **Conflict 2(M3.1 静态化 + SLO 方法)**: PID 运行时耦合 vs static ratio + relative-to-ideal SLO。**用 memory FINDINGS line 144/286 已有数据 force decision**:P1.6e 实测 PID 跨 4 档 SLO 都钉 ratio_max=0.8,driver warmup=20s 已过滤 5-10s 启动爬升期。**现有 M3.1 数据 = effectively static ratio=0.8 with profile**。
+  3. **Conflict 3(mechanism proof 方法)**: synthetic controlled experiment vs post-hoc telemetry decomposition。**用户提议三层结合**:B (post-hoc on existing telemetry) 出 defining figure 数据版 → C (trace-sampled synthetic + Poisson QPS sweep) 出 winning region heatmap → L3 (real trace replay) 出 generalization Pareto。
+- **关键 narrative 升级(本次新增,跟 D-011 兼容但更深):**
+  - **Goal-first thesis statement(替代 D-011 mechanism-first 措辞):**
+    > "PD-TDM **deliberately trades tail latency for mean latency** to maximize goodput on accelerators without spatial partitioning. This trade-off is **net-positive on TTFT-sensitive workloads** (long-prompt, high-concurrency) and **net-negative on TPOT-sensitive workloads** (long-output), which we explicitly cede. Double-SLO goodput surfaces this designed trade-off as the primary metric."
+  - **三层结构(对齐 thesis_framing.md L1/L2/L3,但修正 L3 含义):**
+    - **L1 Interference Shifting Framework** = paradigm 分析层(为什么不同 paradigm SLO 表现不同) — analytical foundation,**不是独立 contribution,是 PD-TDM 的设计合理性来源**
+    - **L2 Phase-Pure Temporal Multiplexing** = mechanism 层(怎么实现 mean→tail 转移) — token bucket + static ratio
+    - **L3 Per-Workload Static Ratio** = ratio 选择层(怎么选 ratio) — **修正自 thesis_framing.md 的 "SLO-Aware Ratio Selection"**,因为 L3 narrative 强度待 H2 verify
+  - **主指标 = TTFT P99 + TPOT P99 双 SLO goodput**(DistServe / Semi-PD 同款,不是单 TPOT_p99 也不是 TBT):
+    - 不选 TBT:MuxWise/Sarathi 用 TBT 因为他们卖点是消除瞬时 stall,我们是 paradigm-level 转移,TBT 会把 NPU jitter 跟 paradigm 差异混在一起 under-state 我们 contribution
+    - 单 p99 会丢失 mean 改善信号(conv 上 M3.1 双 p99 跟 C3 持平但 mean 大胜)
+    - 双 SLO 形式:max sustainable QPS at attainment ≥ 90% under (TTFT < T_ttft) AND (TPOT < T_tpot)
+  - **SLO 方法学 = Sarathi 风格 relative-to-ideal × 5×/25×,absolute + relative 双标注**:
+    - 拒绝 doc 的 absolute grid {200,500,1000,1500} × {50,100,200,300}(因为是 GPU 经验值,跨硬件不适配,容易出现"全输"或"全 ceiling"的两边坑)
+    - 也拒绝早期 reference profile 用 trace-based 低 qps 测 ideal(实证 conv qps=3.18 / code qps=1.05 有 10× workload bias,code tpot_p99=1791ms 完全污染)
+    - 用 micro-benchmark(concurrent=1,Semi-PD 同款)per (model, workload) 测 ideal_ttft / ideal_tpot
+    - 4-tier:tight (5×) / mid-1 (10×) / mid-2 (15×) / loose (25×) × ideal,absolute ms + "× ideal" footnote 双标注
+  - **M3.1 = static ratio per workload(B2 路径)**:
+    - PID 代码保留 internal(不删,跟 D-011 一致)
+    - Paper 报为 "M3.1 = phase-pure + static ratio,per-workload profiled via one-time scan"
+    - 现有 v8/v8b/azure_p15 数据全部复用(等价于 static ratio=0.8 + 5-10s warmup,driver warmup=20s 已过滤)
+    - 跟 D-011 "SLO-aware fast-loop selector" thesis 的关系:**fast-loop 重新定位为 paper 不主报机制**,L3 主报 per-workload static ratio profiling 协议(配置层面 SLO 自适应,DistServe goodput formulation 同粒度)
+  - **三层实验 hierarchy(冲突 3 resolution)**:
+    - **L1: B Post-hoc**(0 wall)— 从 azure_p15 telemetry 后处理出 mean/tail interference,填 defining figure 数据版 → S5.3
+    - **L2: C Trace-sampled synthetic**(12-18h)— Poisson QPS + 从 trace 经验分布采样 prompt/output → 受控 QPS 变量 + 真实 prompt 长度分布,出 winning region heatmap → S5.4
+    - **L3: Real trace replay**(24-36h)— Azure trace scaled replay + bursty arrival,出 goodput Pareto frontier → S5.2 主图
+    - **三层互补**:L1 证 framework holds(干扰坐标);L2 证 mechanism 可预测(winning region 边界);L3 证 generalization(real-world)
+- **跟 D-011 的精确关系:**
+  - **D-011 active 不变的部分:**
+    - PD-TDM paradigm 在 "lacking SM partitioning support" scope 内
+    - 4-way comparison(C1/C3/M3.1/c4_pd)
+    - MuxWise scope clause complementary positioning
+    - 慢回路 PID 不进 paper,starvation override 不进 paper,graph-aware F only
+    - vllm-ascend v0.11.0rc1 lock,kernel 不作主图
+    - Framing C scope(conceptual = lacking SM partition,evaluation = Ascend 910B3)
+    - 4-paper comparison(Sarathi / DistServe / Semi-PD / MuxWise)定位
+  - **D-011 被修正的部分:**
+    - thesis 措辞:"PD-TDM paradigm + SLO-aware fast-loop selector" → "PD-TDM = L1+L2+L3 三层集成 + goal-first framing"(narrative 更系统化)
+    - SLO meet% 不再作为 secondary(D-011 写"secondary = SLO meet% at fixed QPS")→ secondary 改为 SLO attainment curve,主报锁双 SLO goodput
+    - "fast-loop selector 是 mechanism-level 加成"(D-011 措辞)→ "fast-loop 探索过 PID 钉 max ratio,paper 报为 static ratio per workload"(C5 honest finding)
+  - **D-011 新增的部分:**
+    - 三层结构 narrative(L1/L2/L3)
+    - 双 SLO goodput 主指标 + Sarathi 风格 SLO 方法学
+    - 三层实验 hierarchy(B → C → L3)
+    - Goal-first framing(替代 mechanism-first)
+    - 干扰转移操作分类(T_couple / T_chunk / T_temporal / T_spatial / T_disagg)
+- **本次数据回顾(D-012 决策依据):**
+  - **azure_p15 4-way raw p99**(本 session 首次系统看):
+    - conv w1@1860:M3.1 ttft_mean=220ms / ttft_p99=825ms / tpot_p99=177ms vs C3 ttft_mean=306 / ttft_p99=788 / tpot_p99=175 — **conv 上 M3.1 TTFT_mean 大幅赢,TPOT 持平,无 visible trade-off**
+    - code w1@570:M3.1 ttft_mean=391ms / tpot_p99=1735ms vs C3 ttft_mean=676 / tpot_p99=689 — **code 上 M3.1 TTFT_mean 赢但 TPOT_p99 输 2.5×,visible trade-off**
+  - **v8/v8b matrix complete**(7 offset × 3 seed,conv only,c1 vs c2_m31_2048):
+    - off1860 (HIGH peak, long-prompt): M3.1 稳赢,确认 winning regime
+    - off2160 (HIGH-short): M3.1 输,strict/mid SLO 都一致 → paradigm-level 真反例
+  - **static_scan_3a**(M1+chunk ratio sweep,可作 H2 第一手数据)
+- **新的 open question(D-012 待 verify):**
+  - **H2: PID 钉 0.8 是 workload-adaptive(H1)还是 mechanism-saturated(H2)**? — phase-pure + 单向 urgency(FINDINGS line 157)可能 force ratio 永远撞 ceiling。**影响 L3 narrative 强度**:H1 → "per-workload ratio" 完整 narrative;H2 → "ratio = ratio_max universal,phase-pure 单向有益" 简化 narrative。无论哪种结果都不破坏 thesis,只影响 paper L3 措辞。
+  - **C3 在 NPU 反常根因**:azure_p15 显示 conv 上 C3 ttft_p99 比 M3.1 还差(对应 reviewer attack #6)— 需要从 c3_cp telemetry 找根因(chunk_tokens=2048 太大?FIA kernel issue?vllm-ascend 调度问题?)
+- **实验工作分 4 phase(详见 `experiment_plan.md`):**
+  - **Phase 0(1-2 天):** T3 micro-benchmark ideal(15 min)+ T4 H2 diagnostic(2h post-hoc → 可能 1-2 天 rerun)+ T2 post-hoc B(1 天)+ T1 本决策记录
+  - **Phase 1(3-4 天):** T5 trace-sampled synthetic L2 实验,192 runs 12-18h wall
+  - **Phase 2(3-5 天):** T6 4-way Azure trace QPS sweep,384 runs 24-36h wall(可与 Phase 1 并行)
+  - **Phase 3(3-5 天):** T7 C3 根因 + T8 c4_pd 补跑 + BurstGPT + Mixed workload
+  - **Paper writing:** Phase 4 并行起 W2,实验数据 ready 后写 S5-S6
+- **影响文档:**
+  - `DECISIONS.md`:本条 D-012
+  - `README.md`:当前状态节更新到 2026-05-20,最近决策加 D-012
+  - `EXPERIMENTS.md`:加 azure_p15 4-way raw p99 数据点入主表,加 4 phase 实验
+  - `FINDINGS.md`:加 conv/code workload TPOT_p99 asymmetric trade-off finding,加 H2 待 verify 条目,加 C3 NPU 反常待根因
+  - `PROJECT.md`:主原则更新(SLO 方法学 + 双 SLO 指标 + 三层结构)
+  - `design/paper.md`:S5 evaluation 主图改双 SLO Pareto,S6 加 regime analysis,S7 加 4-paper 精确定位
+  - `past_meeting/thesis_framing.md`:doc 整体 align 本决策(L3 narrative 等 H2 verify 后再细化)
+- **影响代码:**
+  - 暂时无需新代码改动(B2 路径数据复用)
+  - 需要写新 driver(micro-benchmark concurrent=1)
+  - 需要写新 trace-sampler(L2 实验用,从 trace 经验分布采样 prompt/output)
+  - 后续如果 H2 verify 是 H1 → 需要写 code workload static ratio scan
+- **风险:**
+  - **H2 verify 结果可能简化 L3 narrative**:如果是 H2,L3 contribution 措辞要从 "per-workload ratio mapping" 收缩为 "static ratio = ratio_max universal recommendation"。Mitigation:H2 不破坏 thesis,只影响 contribution claim 强度,提前预案准备两版措辞
+  - **三层实验 hierarchy 整体 wall time 大**:Phase 0+1+2+3 ≈ 2-3 周纯实验。Mitigation:Phase 1 + Phase 2 可并行(不同 NPU 节点),paper writing W2 起并行
+  - **azure_p15 数据是 PID-based M3.1**:严格说不是 static-ratio M3.1。Mitigation:用 P1.6e finding 论证 PID 在数据里实际等价于 static@0.8,driver warmup 已过滤启动期。如果 reviewer 攻 → 提供 H2 verify 结果作 evidence
+  - **Code workload 上 paradigm-level loss 不可避免**:azure_p15 实证 M3.1 TPOT_p99 = 1735ms 远输 C3 = 689ms。Mitigation:goal-first framing 把这个 trade-off 写成 deliberate design choice 而非 implementation bug,S6.2 explicit cede 给 C3
+- **状态:** active
+- **Supersedes:**
+  - D-011 部分内容:thesis 措辞("fast-loop selector"→"三层结构 + static ratio"),secondary metric 定义("SLO meet% at fixed QPS"→"SLO attainment curve"),实验清单(原 5 个 W1 task → 三层 hierarchy + 4 phase)
+  - D-011 主体不变:scope / 4-way / MuxWise positioning / vllm-ascend lock / 4-paper comparison
+- **替代关系:** 本决策不取代 D-011,而是在 D-011 框架内 refine narrative + metric + experiment structure
+
+---
+
 ## D-011(2026-05-18)thesis 完整重定位:PD-TDM paradigm + SLO-aware fast-loop selector + Framing C scope
 
 - **触发:** P1.9d + P1.9e + 完整 reviewer attack 分析三件事一起 force 重新定位 thesis。

@@ -1,0 +1,192 @@
+{
+  "summary": {
+    "config_name": "c2_tdm_m31_2048",
+    "workload_name": "poisson_qps0.04_dur180s",
+    "qps_target": 0.04,
+    "duration_s": 180.0,
+    "warmup_s": 30.0,
+    "base_url": "http://127.0.0.1:8000",
+    "model": "/vllm-workspace/models/models/Qwen3-8B",
+    "tracker_jsonl": "/vllm-workspace/Ascend-PD-TDM/results/tdm_trace/qps_sweep_c2_tdm_m31_2048_req.jsonl",
+    "n_submitted": 5,
+    "n_ok": 3,
+    "n_err": 2,
+    "wallclock_s": 198.346,
+    "qps_actual_arrival": 0.028,
+    "window": {
+      "window_s": [
+        30.0,
+        180.0
+      ],
+      "n_in_window": 5,
+      "n_ok": 3,
+      "n_matched": 3,
+      "n_unmatched": 0,
+      "n_meet_slo": 2,
+      "ttft_ms": {
+        "mean": 472.496,
+        "p50": 455.806,
+        "p99": 522.781,
+        "min": 438.899,
+        "max": 522.781
+      },
+      "tpot_ms_mean": {
+        "mean": 23.119,
+        "p50": 23.155,
+        "p99": 23.414,
+        "min": 22.789,
+        "max": 23.414
+      },
+      "e2e_ms": {
+        "mean": 76715.959,
+        "p50": 74086.942,
+        "p99": 86564.638,
+        "min": 69496.296,
+        "max": 86564.638
+      },
+      "output_throughput_tok_s": 65.88,
+      "goodput_tok_s": 44.71,
+      "slo_ttft_ms": 500.0,
+      "slo_tpot_ms": 200.0
+    }
+  },
+  "joined": [
+    {
+      "req_id": "syn-0-000001",
+      "arrival_time_s": 71.07085794649507,
+      "server_req_id": null,
+      "status": 400,
+      "e2e_ms": null,
+      "ttft_ms": null,
+      "tpot_ms_mean": null,
+      "tpot_ms_p99": null,
+      "prompt_tokens": null,
+      "output_tokens": null,
+      "matched": false
+    },
+    {
+      "req_id": "syn-0-000002",
+      "arrival_time_s": 91.23179668463933,
+      "server_req_id": null,
+      "status": 400,
+      "e2e_ms": null,
+      "ttft_ms": null,
+      "tpot_ms_mean": null,
+      "tpot_ms_p99": null,
+      "prompt_tokens": null,
+      "output_tokens": null,
+      "matched": false
+    },
+    {
+      "req_id": "syn-0-000000",
+      "arrival_time_s": 46.51517777663058,
+      "server_req_id": "cmpl-f5b0261f032246cdb9fe263bca4fa168",
+      "status": 200,
+      "e2e_ms": 69496.296,
+      "ttft_ms": 438.8993949890137,
+      "tpot_ms_mean": 22.788724611425966,
+      "tpot_ms_p99": 29.916919708251953,
+      "prompt_tokens": 4218,
+      "output_tokens": 3029,
+      "matched": true
+    },
+    {
+      "req_id": "syn-0-000003",
+      "arrival_time_s": 103.35957828236454,
+      "server_req_id": "cmpl-4367ee3e7bbf4d1f988366505b095e86",
+      "status": 200,
+      "e2e_ms": 86564.638,
+      "ttft_ms": 455.8062038421631,
+      "tpot_ms_mean": 23.41431597293526,
+      "tpot_ms_p99": 30.42760467529297,
+      "prompt_tokens": 4202,
+      "output_tokens": 3677,
+      "matched": true
+    },
+    {
+      "req_id": "syn-0-000004",
+      "arrival_time_s": 124.24934974325734,
+      "server_req_id": "cmpl-95627f5f3a8843a3bc8b655247fa7937",
+      "status": 200,
+      "e2e_ms": 74086.942,
+      "ttft_ms": 522.7814979553223,
+      "tpot_ms_mean": 23.15507651922271,
+      "tpot_ms_p99": 30.406606674194336,
+      "prompt_tokens": 4205,
+      "output_tokens": 3176,
+      "matched": true
+    }
+  ],
+  "client_records": [
+    {
+      "req_id": "syn-0-000001",
+      "arrival_time_s": 71.07085794649507,
+      "submit_ts": 15475236.09170107,
+      "finish_ts": 15475236.127553614,
+      "status": 400,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "server_req_id": null,
+      "error": "{\"error\":{\"message\":\"This model's maximum context length is 4096 tokens. However, your request has 4202 input tokens. Please reduce the length of the input messages.\",\"type\":\"BadRequestError\",\"param\":",
+      "client_ttft_ms": null,
+      "client_tpot_ms_mean": null,
+      "client_n_chunks": null
+    },
+    {
+      "req_id": "syn-0-000002",
+      "arrival_time_s": 91.23179668463933,
+      "submit_ts": 15475256.236705622,
+      "finish_ts": 15475256.264648544,
+      "status": 400,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "server_req_id": null,
+      "error": "{\"error\":{\"message\":\"This model's maximum context length is 4096 tokens. However, your request has 4122 input tokens. Please reduce the length of the input messages.\",\"type\":\"BadRequestError\",\"param\":",
+      "client_ttft_ms": null,
+      "client_tpot_ms_mean": null,
+      "client_n_chunks": null
+    },
+    {
+      "req_id": "syn-0-000000",
+      "arrival_time_s": 46.51517777663058,
+      "submit_ts": 15475211.55907626,
+      "finish_ts": 15475281.055372583,
+      "status": 200,
+      "prompt_tokens": 4218,
+      "completion_tokens": 3029,
+      "server_req_id": "cmpl-f5b0261f032246cdb9fe263bca4fa168",
+      "error": null,
+      "client_ttft_ms": null,
+      "client_tpot_ms_mean": null,
+      "client_n_chunks": null
+    },
+    {
+      "req_id": "syn-0-000003",
+      "arrival_time_s": 103.35957828236454,
+      "submit_ts": 15475268.36690538,
+      "finish_ts": 15475354.931543766,
+      "status": 200,
+      "prompt_tokens": 4202,
+      "completion_tokens": 3677,
+      "server_req_id": "cmpl-4367ee3e7bbf4d1f988366505b095e86",
+      "error": null,
+      "client_ttft_ms": null,
+      "client_tpot_ms_mean": null,
+      "client_n_chunks": null
+    },
+    {
+      "req_id": "syn-0-000004",
+      "arrival_time_s": 124.24934974325734,
+      "submit_ts": 15475289.255757445,
+      "finish_ts": 15475363.342699522,
+      "status": 200,
+      "prompt_tokens": 4205,
+      "completion_tokens": 3176,
+      "server_req_id": "cmpl-95627f5f3a8843a3bc8b655247fa7937",
+      "error": null,
+      "client_ttft_ms": null,
+      "client_tpot_ms_mean": null,
+      "client_n_chunks": null
+    }
+  ]
+}

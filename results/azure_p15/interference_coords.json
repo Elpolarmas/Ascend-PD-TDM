@@ -1,0 +1,208 @@
+{
+  "source": "azure_p15 req.jsonl \u00d7 4 cfg \u00d7 2 workload \u00d7 3 seed",
+  "x_axis": "mean_interference = global mean(per-req ttft_ms)",
+  "y_axis": "tail_interference = global mean(per-req tpot_ms_p99)",
+  "framework": "thesis_framing L1: PD scheduling = interference shifting operation",
+  "coords": [
+    {
+      "config": "c1_baseline",
+      "workload": "conv_w1",
+      "mean_interference_axis_ttft": {
+        "n": 1518,
+        "mean": 306.14,
+        "p50": 270.47,
+        "p90": 597.56,
+        "p99": 669.72
+      },
+      "tail_interference_axis_tpot_p99": {
+        "n": 1518,
+        "mean": 1095.35,
+        "p50": 955.8,
+        "p90": 1390.4,
+        "p99": 7862.34
+      },
+      "tpot_mean_context": {
+        "n": 1518,
+        "mean": 150.96,
+        "p50": 153.65,
+        "p90": 204.36,
+        "p99": 274.87
+      }
+    },
+    {
+      "config": "c2_tdm_m1_chunk2048",
+      "workload": "conv_w1",
+      "mean_interference_axis_ttft": {
+        "n": 1518,
+        "mean": 257.27,
+        "p50": 162.98,
+        "p90": 639.11,
+        "p99": 962.02
+      },
+      "tail_interference_axis_tpot_p99": {
+        "n": 1518,
+        "mean": 864.42,
+        "p50": 788.14,
+        "p90": 1149.67,
+        "p99": 6282.82
+      },
+      "tpot_mean_context": {
+        "n": 1518,
+        "mean": 146.33,
+        "p50": 149.16,
+        "p90": 193.44,
+        "p99": 259.96
+      }
+    },
+    {
+      "config": "c2_tdm_m31_2048",
+      "workload": "conv_w1",
+      "mean_interference_axis_ttft": {
+        "n": 1518,
+        "mean": 242.49,
+        "p50": 159.04,
+        "p90": 556.81,
+        "p99": 863.48
+      },
+      "tail_interference_axis_tpot_p99": {
+        "n": 1518,
+        "mean": 908.48,
+        "p50": 861.87,
+        "p90": 1145.71,
+        "p99": 6169.32
+      },
+      "tpot_mean_context": {
+        "n": 1518,
+        "mean": 145.88,
+        "p50": 148.99,
+        "p90": 191.37,
+        "p99": 257.18
+      }
+    },
+    {
+      "config": "c3_cp",
+      "workload": "conv_w1",
+      "mean_interference_axis_ttft": {
+        "n": 1518,
+        "mean": 355.72,
+        "p50": 306.34,
+        "p90": 643.89,
+        "p99": 1161.78
+      },
+      "tail_interference_axis_tpot_p99": {
+        "n": 1518,
+        "mean": 571.2,
+        "p50": 620.7,
+        "p90": 653.31,
+        "p99": 669.34
+      },
+      "tpot_mean_context": {
+        "n": 1518,
+        "mean": 142.84,
+        "p50": 146.63,
+        "p90": 182.82,
+        "p99": 239.06
+      }
+    },
+    {
+      "config": "c1_baseline",
+      "workload": "code_w1",
+      "mean_interference_axis_ttft": {
+        "n": 2004,
+        "mean": 620.17,
+        "p50": 627.2,
+        "p90": 706.13,
+        "p99": 816.89
+      },
+      "tail_interference_axis_tpot_p99": {
+        "n": 2004,
+        "mean": 6225.58,
+        "p50": 5795.07,
+        "p90": 11638.22,
+        "p99": 14417.32
+      },
+      "tpot_mean_context": {
+        "n": 2004,
+        "mean": 699.35,
+        "p50": 533.54,
+        "p90": 1473.06,
+        "p99": 2431.5
+      }
+    },
+    {
+      "config": "c2_tdm_m1_chunk2048",
+      "workload": "code_w1",
+      "mean_interference_axis_ttft": {
+        "n": 2004,
+        "mean": 442.71,
+        "p50": 317.66,
+        "p90": 961.86,
+        "p99": 1894.64
+      },
+      "tail_interference_axis_tpot_p99": {
+        "n": 2004,
+        "mean": 5197.79,
+        "p50": 4755.43,
+        "p90": 10479.75,
+        "p99": 12834.97
+      },
+      "tpot_mean_context": {
+        "n": 2004,
+        "mean": 587.31,
+        "p50": 471.66,
+        "p90": 1193.25,
+        "p99": 2187.27
+      }
+    },
+    {
+      "config": "c2_tdm_m31_2048",
+      "workload": "code_w1",
+      "mean_interference_axis_ttft": {
+        "n": 2004,
+        "mean": 440.3,
+        "p50": 314.25,
+        "p90": 960.9,
+        "p99": 1622.0
+      },
+      "tail_interference_axis_tpot_p99": {
+        "n": 2004,
+        "mean": 5269.12,
+        "p50": 4829.37,
+        "p90": 10568.76,
+        "p99": 12843.72
+      },
+      "tpot_mean_context": {
+        "n": 2004,
+        "mean": 583.42,
+        "p50": 468.19,
+        "p90": 1192.43,
+        "p99": 2216.68
+      }
+    },
+    {
+      "config": "c3_cp",
+      "workload": "code_w1",
+      "mean_interference_axis_ttft": {
+        "n": 2004,
+        "mean": 737.99,
+        "p50": 650.42,
+        "p90": 1304.05,
+        "p99": 1350.47
+      },
+      "tail_interference_axis_tpot_p99": {
+        "n": 2004,
+        "mean": 679.94,
+        "p50": 678.31,
+        "p90": 725.9,
+        "p99": 814.85
+      },
+      "tpot_mean_context": {
+        "n": 2004,
+        "mean": 561.87,
+        "p50": 646.97,
+        "p90": 661.01,
+        "p99": 686.1
+      }
+    }
+  ]
+}

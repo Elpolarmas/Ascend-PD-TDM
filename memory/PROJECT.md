@@ -1,7 +1,7 @@
 # 项目核心
 
 > 这个文档说的是不轻易变的事情。任何 thesis 级修改要走 `DECISIONS.md` 记录。
-> **当前 thesis 版本: D-011(2026-05-18)** — 历次 thesis 修订见 `DECISIONS.md`。
+> **当前 thesis 版本: D-013(2026-05-25)** — 在 D-011 + D-012 框架内,Phase 1 数据后 framing 修正:**"phase-pure batching 让 cycle 时间短于 c3 mixed iter,mean/tail 同步改善"**(不是原 "trade tail for mean")。历次 thesis 修订见 `DECISIONS.md`。
 
 ---
 
@@ -32,12 +32,15 @@
    - 这个 scope 是 MuxWise(ASPLOS'26)"supports intra-process spatial sharing" scope 的 explicit complement set
    - Title 不锁 NPU,Section 1 明确 scope statement
 
-4. **对手 = 4-way paradigm comparison**(D-011 修订,scope 扩展)
-   - **C1 baseline:** Unified TP=2,无 chunked prefill
-   - **C3 Chunked Prefill (vLLM-CP):** Sarathi-Serve paradigm 的 open-source implementation
-   - **c4_pd PD-disagg 1P1D:** budget-equivalent reference point(不 claim 普遍反优势,1P:1D 是资源受限被迫配置)
-   - **M3.1 PD-TDM(我们):** temporal multiplexing
+4. **对手 = 4-way paradigm comparison**(D-014 baseline 重定位,2026-05-26)
+   - **Vanilla CB(主流 LLM serving 文献 baseline):** vllm v1 chunked prefill 路径 + `max_num_batched_tokens=8192`,Azure trace prompt cap=7000 < 8192 → chunk 实际不触发 = mixed batch + 长 prompt 整 iter 一次跑完。数据 = 老 c3 chunk=8192(`phase_2_t6_burst_goodput/*_nonpid/c3_cp_qps0.0.json`)。
+   - **Sarathi chunked prefill(主流 LLM serving 文献 baseline):** Sarathi-Serve paradigm 的 open-source impl(vllm v1 chunked prefill + chunk=2048)。数据 = `c3_chunk2048_supplement/`。
+   - **c4_pd PD-disagg 1P1D(reference):** budget-equivalent reference point(不 claim 普遍反优势,1P:1D 是资源受限被迫配置)。
+   - **PD-TDM (M3.1, ours):** chunked prefill 框架内的 phase-pure variant(同样 chunk_budget=2048)。数据 = `m31fix_validate/`。
+   - ~~C1 (admit-driven phase-pure)~~ **从 paper 主线移除**(D-014):NPU-specific niche design,文献无对应命名;代码 / 数据保留 internal use。
    - 不直接对比 MuxWise(spatial,需要 SM partition,scope 不交)/ Semi-PD(angle 不同)/ DistServe family(multi-node)
+
+   **Baseline 命名原则(D-014 新加)**:必须跟主流 LLM serving 文献对应。Vanilla CB / Sarathi chunked prefill / PD-TDM 都是文献术语。Reviewer 一眼可 map。
 
 5. **vllm-ascend 锁 v0.11.0rc1**(D-007)
    - PR #4623 在 v0.13.0 删了 AscendScheduler,无迁移路径
@@ -47,10 +50,21 @@
    - 同 kernel ablation 已实证 kernel 贡献 ≈ 0
    - 只用来解释「为什么 C3 在 NPU 上反常输 C1」
 
-7. **实验聚焦 qps sweep + 校准 SLO grid + cross-model**(D-011 修订)
-   - QPS sweep:[2, 4, 6, 8, 10, 12, 14, 16],找 max sustainable QPS
-   - SLO target 多档:60% / 70% / 80% / 90%(避免锁单一 target)
-   - Cross-model:Qwen3-4B + Qwen3-8B(不加 Llama / Llama-3.2 / MoE,Limitations 节诚实承认 cross-family 未测)
+7. **实验聚焦 burst trace sweep + 校准 SLO grid + cross-model**(D-013 修订)
+   - **T6 burst goodput sweep** = paper Section 5 主图:2 wl × 7 k(burst intensity)× 3 SLO × 3 seed = 126 cells
+   - Arrival = `trace_sampled_burst`(Azure trace,period=10s,high/low QPS 按 k scale)
+   - SLO grid = Sarathi 风格 × {5,10,15}× × micro-benchmark ideal
+   - Cross-model:Qwen3-4B + Qwen3-8B(Phase 2 待跑)
+
+8. **任何 cite m31 数据前必须确认是 fix 版**(D-013)
+   - 检查 outdir 是 `m31fix_validate/`(fix 版)
+   - 旧版 `phase_2_t6_burst_goodput/*_pid/` 数据已删除(5/25 cleanup)
+   - chunked_schedule.py 必须含 Diff #6(waiting loop gate `self.phase == "prefill"`)
+
+9. **c3 vs c1 不普适胜出**(D-013)
+   - code 上 c3 大幅胜 c1(strict SLO Δmeet +14~+75pp)
+   - **conv strict SLO 上 c3 反输 c1 -4~-19pp**(chunked prefill 短 prompt 高频负载弱点)
+   - paper Section 5 须 explicit 讲此 caveat,不能假设 c3 > c1
 
 ---
 

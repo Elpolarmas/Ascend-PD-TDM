@@ -1,0 +1,202 @@
+{
+  "conv": {
+    "s1": {
+      "c1_baseline": {
+        "max_qps": 2.767,
+        "saturated": true,
+        "goodput_at_max": 713.55,
+        "peak_meet": 0.772,
+        "goodput_at_peak_meet": 713.55,
+        "note": "first_k_below_threshold"
+      },
+      "c3_cp": {
+        "max_qps": 2.767,
+        "saturated": true,
+        "goodput_at_max": 671.37,
+        "peak_meet": 0.728,
+        "goodput_at_peak_meet": 671.37,
+        "note": "first_k_below_threshold"
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 2.767,
+        "saturated": true,
+        "goodput_at_max": 766.42,
+        "peak_meet": 0.835,
+        "goodput_at_peak_meet": 766.42,
+        "note": "first_k_below_threshold"
+      }
+    },
+    "s2": {
+      "c1_baseline": {
+        "max_qps": 2.767,
+        "saturated": true,
+        "goodput_at_max": 758.77,
+        "peak_meet": 0.844,
+        "goodput_at_peak_meet": 758.77,
+        "note": "first_k_below_threshold"
+      },
+      "c3_cp": {
+        "max_qps": 2.767,
+        "saturated": true,
+        "goodput_at_max": 754.48,
+        "peak_meet": 0.843,
+        "goodput_at_peak_meet": 754.48,
+        "note": "first_k_below_threshold"
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 2.767,
+        "saturated": true,
+        "goodput_at_max": 779.17,
+        "peak_meet": 0.859,
+        "goodput_at_peak_meet": 779.17,
+        "note": "first_k_below_threshold"
+      }
+    },
+    "s3": {
+      "c1_baseline": {
+        "max_qps": 6.172,
+        "saturated": true,
+        "goodput_at_max": 1576.5,
+        "peak_meet": 0.969,
+        "goodput_at_peak_meet": 830.3
+      },
+      "c3_cp": {
+        "max_qps": 16.833,
+        "saturated": false,
+        "goodput_at_max": 4965.53,
+        "peak_meet": 0.912,
+        "goodput_at_peak_meet": 826.65
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 13.232,
+        "saturated": true,
+        "goodput_at_max": 3688.1,
+        "peak_meet": 0.944,
+        "goodput_at_peak_meet": 834.12
+      }
+    },
+    "s4": {
+      "c1_baseline": {
+        "max_qps": 16.833,
+        "saturated": false,
+        "goodput_at_max": 5120.77,
+        "peak_meet": 1.0,
+        "goodput_at_peak_meet": 843.93
+      },
+      "c3_cp": {
+        "max_qps": 16.833,
+        "saturated": false,
+        "goodput_at_max": 5149.5,
+        "peak_meet": 1.0,
+        "goodput_at_peak_meet": 843.93
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 16.833,
+        "saturated": false,
+        "goodput_at_max": 5069.03,
+        "peak_meet": 1.0,
+        "goodput_at_peak_meet": 843.93
+      }
+    }
+  },
+  "code": {
+    "s1": {
+      "c1_baseline": {
+        "max_qps": 1.867,
+        "saturated": true,
+        "goodput_at_max": 53.98,
+        "peak_meet": 0.632,
+        "goodput_at_peak_meet": 53.98,
+        "note": "first_k_below_threshold"
+      },
+      "c3_cp": {
+        "max_qps": 1.867,
+        "saturated": true,
+        "goodput_at_max": 63.67,
+        "peak_meet": 0.779,
+        "goodput_at_peak_meet": 63.67,
+        "note": "first_k_below_threshold"
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 1.867,
+        "saturated": true,
+        "goodput_at_max": 64.0,
+        "peak_meet": 0.773,
+        "goodput_at_peak_meet": 64.0,
+        "note": "first_k_below_threshold"
+      }
+    },
+    "s2": {
+      "c1_baseline": {
+        "max_qps": 1.867,
+        "saturated": true,
+        "goodput_at_max": 56.15,
+        "peak_meet": 0.699,
+        "goodput_at_peak_meet": 56.15,
+        "note": "first_k_below_threshold"
+      },
+      "c3_cp": {
+        "max_qps": 1.867,
+        "saturated": true,
+        "goodput_at_max": 65.72,
+        "peak_meet": 0.877,
+        "goodput_at_peak_meet": 65.72,
+        "note": "first_k_below_threshold"
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 1.867,
+        "saturated": true,
+        "goodput_at_max": 67.07,
+        "peak_meet": 0.853,
+        "goodput_at_peak_meet": 67.07,
+        "note": "first_k_below_threshold"
+      }
+    },
+    "s3": {
+      "c1_baseline": {
+        "max_qps": 3.303,
+        "saturated": true,
+        "goodput_at_max": 76.35,
+        "peak_meet": 0.988,
+        "goodput_at_peak_meet": 76.35
+      },
+      "c3_cp": {
+        "max_qps": 13.733,
+        "saturated": false,
+        "goodput_at_max": 548.85,
+        "peak_meet": 1.0,
+        "goodput_at_peak_meet": 76.35
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 3.697,
+        "saturated": true,
+        "goodput_at_max": 145.58,
+        "peak_meet": 0.988,
+        "goodput_at_peak_meet": 76.35
+      }
+    },
+    "s4": {
+      "c1_baseline": {
+        "max_qps": 10.118,
+        "saturated": true,
+        "goodput_at_max": 377.78,
+        "peak_meet": 1.0,
+        "goodput_at_peak_meet": 76.35
+      },
+      "c3_cp": {
+        "max_qps": 13.733,
+        "saturated": false,
+        "goodput_at_max": 548.85,
+        "peak_meet": 1.0,
+        "goodput_at_peak_meet": 76.35
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 13.733,
+        "saturated": false,
+        "goodput_at_max": 538.4,
+        "peak_meet": 1.0,
+        "goodput_at_peak_meet": 76.35
+      }
+    }
+  }
+}

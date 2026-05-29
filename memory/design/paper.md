@@ -102,6 +102,71 @@ chunk_tokens=2048(p1_chunk_scan sweet spot,见 `chunking.md`)。
 
 ---
 
+## 3b. Mechanism-Level Comparison: Why PD-TDM Improves Mean Latency
+
+> 这一节是 Section 3/4 的核心论点支撑:**chunking 本身不是优势源(C3 也 chunk),phase-pure 本身也不是充分条件(C1 隐式 phase-pure 但仍输)。PD-TDM 的真正机制 = explicit ratio control over phase switching frequency,叠加 phase-pure + chunking 两个辅助机制,在 TTFT-sensitive 工况下同时改善 TTFT_mean 和 TPOT_mean,从而提升 goodput at SLO**。
+
+### 3b.1 单 iter 调度层面的差异
+
+| 维度 | **C1** Unified (V0 hybrid) | **C3** Chunked Prefill (Sarathi) | **M1+chunk** static TDM | **M3.1** PD-TDM (Ours) |
+|---|---|---|---|---|
+| 单 iter phase 组成 | 全 prefill OR 全 decode(V0 强制) | prefill chunks + decode 同存 | 全 prefill OR 全 decode | 全 prefill OR 全 decode |
+| Phase 切换决策 | **隐式** (admit-driven):running 清空才切 prefill | 不切相(每 iter 都混) | **显式** ratio knob (static) | **显式** ratio knob + SLO PID 反馈 |
+| Prefill 切块 | ❌ 一次跑完整个 prompt | ✅ chunk=2048 切碎 | ✅ chunk=2048(限单 iter prefill 预算) | ✅ chunk=2048(同 M1) |
+| Prefill iter token budget | 8192 全给 prefill | budget 被 decode 摊薄 | 8192 全给 prefill | 8192 全给 prefill |
+| Decode iter token budget | 8192 全给 decode | budget 被 prefill chunk 摊薄 | 8192 全给 decode | 8192 全给 decode |
+| Prefill iter 触发频率 | 不可控(load-coupled) | N/A(每 iter 都混) | bounded by ratio 周期 | bounded by ratio + PID 自适应 |
+
+### 3b.2 物理链条:为什么 TTFT_mean 表现不同
+
+**TTFT = 请求到达 → 第一个 decode token = 排队等 prefill iter + prefill 计算时间**
+
+| paradigm | 排队部分(主导项) | 计算部分 | TTFT_mean 预测 |
+|---|---|---|---|
+| C1 | 大 prompt 必须等 running set 清空才切 prefill iter,持续负载下队列堆积 | 单 iter 整个 prompt 跑完(快) | 高负载下 **升高**(排队主导) |
+| C3 | 每 iter 都接收 prefill chunk,排队短 | 多 iter 累计,且每 chunk 跟 decode 共享 budget → 每 iter 进展慢 | **最高**(计算项被 decode 拖慢) |
+| M1+chunk | bounded by ratio 周期 | prefill iter 内 batch 多请求,8192 全用于 prefill | **低**(排队 + 计算都好) |
+| M3.1 | 同 M1 + PID 在 ttft 紧张时拉高 ratio | 同 M1 | **最低**(PID 加成) |
+
+**T2 azure_p15 conv 实测**(3 windows × 3 seeds,18 runs pool):
+- C1=208.0  C3=253.4  M1+chunk=225.8  **M3.1=188.6** ms ← M3.1 最低,vs C1 -19ms,vs C3 -65ms
+
+### 3b.3 物理链条:为什么 TPOT_mean 表现不同
+
+**TPOT = 单请求 inter-token-latency 均值 = decode iter 跨度 × 一个请求每隔几 iter 被服务一次**
+
+| paradigm | 单 decode iter 跨度 | 服务频率 | TPOT_mean 预测 |
+|---|---|---|---|
+| C1 | 短(纯 decode iter)**但**插入大 prefill iter 时整段沉默 | 每 iter 都在 batch 内,prefill iter 期间停 | mean 由 prefill iter 占比决定 |
+| C3 | 长(decode 跟 prefill chunk 共 budget) | 每 iter 都被服务(混在一起) | 单 iter 慢,token 间隔均匀 |
+| M1+chunk | 短(纯 decode iter 高效) | 由 ratio 决定 | mean = decode_iter_time × (1 + ratio·prefill_iter_time/decode_iter_time) |
+| M3.1 | 同 M1 | ratio 自适应:无饱和时 ratio 低 → decode 占比高 → mean 更低 | **无饱和时最低** |
+
+**关键非对称**:
+- **conv 工况**(短 prompt,prefill iter 跨度 ≈ decode iter 跨度):M3.1 的 prefill 停顿期短 → TPOT_mean 跟 C3 接近、压住 C1
+- **code 工况**(长 prompt,prefill iter ≫ decode iter):M3.1 的 prefill 停顿期长 → TPOT_mean 升高,反输 C3
+
+**T2 实测**:
+- conv TPOT_mean: C1=114.6  C3=111.9  M1+chunk=119.1  **M3.1=111.9** ← 对 C1 赢 -2.7,对 C3 打平
+- code TPOT_mean: C1=695.7  **C3=504.9**  M1+chunk=611.6  M3.1=604.6 ← 对 C1 赢 -91,对 C3 输 +100
+
+→ thesis "M3.1 同时改善 TTFT_mean + TPOT_mean → 提升 goodput at SLO" 在 **vs C1 baseline 上完全验证**;vs C3 在 conv 上 ttft 大赢 / tpot 持平,在 code 上 ttft 大赢 / tpot 反输 → 这就是 D-012 写的 "**net-positive on TTFT-sensitive workloads, net-negative on long-output TPOT-sensitive workloads, which we explicitly cede**" 的物理来源。
+
+### 3b.4 关键 message(paper headline 候选)
+
+> PD-TDM 的真正贡献不是 "chunking"(C3 也 chunk),不是 "phase-pure"(C1 隐式 phase-pure),也不是单纯叠加两者(M1+chunk 也叠加),而是 **explicit ratio control over phase switching frequency**:把 phase 切换从 admit decision 中解耦,通过 ratio knob 保证 prefill iter 周期性发生(不依赖 running set 是否空闲),并通过 SLO PID 在饱和时主动加大 ratio。这一机制叠加 phase-pure(让每 iter 的 token budget 全用满)和 chunking(限制单 prefill iter 长度避免饿死 decode),在 TTFT-sensitive 工况下同时压低 TTFT_mean 和 TPOT_mean,从而把 goodput at SLO 推到 unified baseline 之上。
+
+### 3b.5 跟 §5b ablation 矩阵的对应
+
+| Claim | §5b 矩阵 cell | 本节物理预测 | 实测对应 |
+|---|---|---|---|
+| A. phase-pure 时分复用 | mixed_mode on/off | C1→M1+chunk 跨度 = phase-pure + ratio 总效应 | P1.8 phase Δ = 86-101% 总差距 |
+| B1. ratio knob 控制角色 | M1 ratio scan vs M3.1 | M1 静态 ratio scan 应该有 peak | T4 phase_a static_scan(5/20 弱微 H1) |
+| B2. SLO PID 加成 | M3.1 vs M1+chunk | PID 在 ttft 紧张时拉 ratio → ttft_mean -17ms | conv 实测 m31_2048=188.6 vs m1_chunk=225.8(-37ms) |
+| C. chunk=2048 sweet spot | p1_chunk_scan | 防止单 prefill iter 太长卡 decode | 已完成 |
+
+---
+
 ## 4. 主要实验结论(详见 `FINDINGS.md` 和 `EXPERIMENTS.md`)
 
 ### 4.1 主胜区:M3.1 chunking 在区分带

@@ -1,0 +1,226 @@
+{
+  "conv": {
+    "s1": {
+      "c1_baseline": {
+        "max_qps": 2.767,
+        "saturated": true,
+        "goodput_at_max": 713.55,
+        "meet_at_max": 0.772,
+        "note": "first_k_already_below_threshold",
+        "peak_meet_frac": 0.772,
+        "goodput_at_peak_meet": 713.55
+      },
+      "c3_cp": {
+        "max_qps": 2.767,
+        "saturated": true,
+        "goodput_at_max": 721.18,
+        "meet_at_max": 0.79,
+        "note": "first_k_already_below_threshold",
+        "peak_meet_frac": 0.79,
+        "goodput_at_peak_meet": 721.18
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 2.767,
+        "saturated": true,
+        "goodput_at_max": 766.42,
+        "meet_at_max": 0.835,
+        "note": "first_k_already_below_threshold",
+        "peak_meet_frac": 0.835,
+        "goodput_at_peak_meet": 766.42
+      }
+    },
+    "s2": {
+      "c1_baseline": {
+        "max_qps": 2.767,
+        "saturated": true,
+        "goodput_at_max": 758.77,
+        "meet_at_max": 0.844,
+        "note": "first_k_already_below_threshold",
+        "peak_meet_frac": 0.844,
+        "goodput_at_peak_meet": 758.77
+      },
+      "c3_cp": {
+        "max_qps": 2.767,
+        "saturated": true,
+        "goodput_at_max": 752.47,
+        "meet_at_max": 0.831,
+        "note": "first_k_already_below_threshold",
+        "peak_meet_frac": 0.831,
+        "goodput_at_peak_meet": 752.47
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 2.767,
+        "saturated": true,
+        "goodput_at_max": 779.17,
+        "meet_at_max": 0.859,
+        "note": "first_k_already_below_threshold",
+        "peak_meet_frac": 0.859,
+        "goodput_at_peak_meet": 779.17
+      }
+    },
+    "s3": {
+      "c1_baseline": {
+        "max_qps": 6.172,
+        "saturated": true,
+        "goodput_at_max": 1576.5,
+        "meet_at_max": 0.922,
+        "peak_meet_frac": 0.969,
+        "goodput_at_peak_meet": 830.3
+      },
+      "c3_cp": {
+        "max_qps": 6.532,
+        "saturated": true,
+        "goodput_at_max": 1608.82,
+        "meet_at_max": 0.915,
+        "peak_meet_frac": 0.964,
+        "goodput_at_peak_meet": 823.03
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 13.232,
+        "saturated": true,
+        "goodput_at_max": 3688.1,
+        "meet_at_max": 0.903,
+        "peak_meet_frac": 0.944,
+        "goodput_at_peak_meet": 834.12
+      }
+    },
+    "s4": {
+      "c1_baseline": {
+        "max_qps": 16.833,
+        "saturated": false,
+        "goodput_at_max": 5120.77,
+        "meet_at_max": 0.99,
+        "peak_meet_frac": 1.0,
+        "goodput_at_peak_meet": 843.93
+      },
+      "c3_cp": {
+        "max_qps": 16.833,
+        "saturated": false,
+        "goodput_at_max": 4883.63,
+        "meet_at_max": 0.949,
+        "peak_meet_frac": 1.0,
+        "goodput_at_peak_meet": 843.93
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 16.833,
+        "saturated": false,
+        "goodput_at_max": 5069.03,
+        "meet_at_max": 0.985,
+        "peak_meet_frac": 1.0,
+        "goodput_at_peak_meet": 843.93
+      }
+    }
+  },
+  "code": {
+    "s1": {
+      "c1_baseline": {
+        "max_qps": 1.867,
+        "saturated": true,
+        "goodput_at_max": 53.98,
+        "meet_at_max": 0.632,
+        "note": "first_k_already_below_threshold",
+        "peak_meet_frac": 0.632,
+        "goodput_at_peak_meet": 53.98
+      },
+      "c3_cp": {
+        "max_qps": 1.867,
+        "saturated": true,
+        "goodput_at_max": 55.23,
+        "meet_at_max": 0.649,
+        "note": "first_k_already_below_threshold",
+        "peak_meet_frac": 0.649,
+        "goodput_at_peak_meet": 55.23
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 1.867,
+        "saturated": true,
+        "goodput_at_max": 64.0,
+        "meet_at_max": 0.773,
+        "note": "first_k_already_below_threshold",
+        "peak_meet_frac": 0.773,
+        "goodput_at_peak_meet": 64.0
+      }
+    },
+    "s2": {
+      "c1_baseline": {
+        "max_qps": 1.867,
+        "saturated": true,
+        "goodput_at_max": 56.15,
+        "meet_at_max": 0.699,
+        "note": "first_k_already_below_threshold",
+        "peak_meet_frac": 0.699,
+        "goodput_at_peak_meet": 56.15
+      },
+      "c3_cp": {
+        "max_qps": 1.867,
+        "saturated": true,
+        "goodput_at_max": 56.33,
+        "meet_at_max": 0.714,
+        "note": "first_k_already_below_threshold",
+        "peak_meet_frac": 0.714,
+        "goodput_at_peak_meet": 56.33
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 1.867,
+        "saturated": true,
+        "goodput_at_max": 67.07,
+        "meet_at_max": 0.853,
+        "note": "first_k_already_below_threshold",
+        "peak_meet_frac": 0.853,
+        "goodput_at_peak_meet": 67.07
+      }
+    },
+    "s3": {
+      "c1_baseline": {
+        "max_qps": 3.303,
+        "saturated": true,
+        "goodput_at_max": 76.35,
+        "meet_at_max": 0.988,
+        "peak_meet_frac": 0.988,
+        "goodput_at_peak_meet": 76.35
+      },
+      "c3_cp": {
+        "max_qps": 3.918,
+        "saturated": true,
+        "goodput_at_max": 146.72,
+        "meet_at_max": 0.929,
+        "peak_meet_frac": 0.994,
+        "goodput_at_peak_meet": 76.35
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 3.697,
+        "saturated": true,
+        "goodput_at_max": 145.58,
+        "meet_at_max": 0.903,
+        "peak_meet_frac": 0.988,
+        "goodput_at_peak_meet": 76.35
+      }
+    },
+    "s4": {
+      "c1_baseline": {
+        "max_qps": 10.118,
+        "saturated": true,
+        "goodput_at_max": 377.78,
+        "meet_at_max": 0.908,
+        "peak_meet_frac": 1.0,
+        "goodput_at_peak_meet": 76.35
+      },
+      "c3_cp": {
+        "max_qps": 13.733,
+        "saturated": false,
+        "goodput_at_max": 548.85,
+        "meet_at_max": 1.0,
+        "peak_meet_frac": 1.0,
+        "goodput_at_peak_meet": 76.35
+      },
+      "c2_tdm_m31_2048": {
+        "max_qps": 13.733,
+        "saturated": false,
+        "goodput_at_max": 538.4,
+        "meet_at_max": 0.923,
+        "peak_meet_frac": 1.0,
+        "goodput_at_peak_meet": 76.35
+      }
+    }
+  }
+}

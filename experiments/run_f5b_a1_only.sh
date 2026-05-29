@@ -1,0 +1,56 @@
+#!/bin/bash
+# F5b A1 only — dh_chunk1 (prompt~2048 / output~4096)
+set -e
+
+ROOT=/vllm-workspace/Ascend-PD-TDM
+SCRIPT=$ROOT/experiments/run_qps_sweep_all.py
+PY=/usr/local/python3.11.13/bin/python3
+OUT=$ROOT/results/f5b_decode_heavy_long_prompt
+TRACE_DIR=$ROOT/results/tdm_trace
+
+DURATION=180
+WARMUP=30
+SEED=0
+MML=16384
+
+DH1_OPTS="--prompt-mu 7.58 --prompt-sigma 0.3 --prompt-min 1024 --prompt-max 4096 \
+          --output-mu 8.27 --output-sigma 0.3 --output-min 2048 --output-max 8192"
+DH1_QPS="0.05,0.10,0.15,0.20,0.25"
+
+run_tuple() {
+  local paradigm=$1
+  local d=$OUT/dh1_${paradigm}_seed${SEED}
+  if [[ -f "$d/qps_sweep_summary.json" ]]; then
+    echo "[skip] $d"
+    return 0
+  fi
+
+  local cfg mb
+  case "$paradigm" in
+    sarathi) cfg="c3_cp";           mb=2048 ;;
+    pdtdm)   cfg="c2_tdm_m31_2048"; mb=$MML ;;
+  esac
+
+  mkdir -p "$d/tdm_trace"
+  echo "===== $(date '+%H:%M:%S') $d  cfg=$cfg mb=$mb ====="
+  $PY "$SCRIPT" \
+    --configs "$cfg" --qps "$DH1_QPS" \
+    --duration $DURATION --warmup $WARMUP \
+    --max-model-len $MML --max-num-batched-tokens "$mb" \
+    --slo-ttft-ms 500 --slo-tpot-ms 200 \
+    --arrival-mode poisson \
+    $DH1_OPTS \
+    --outdir "$d" --seed $SEED 2>&1 | tail -20
+
+  for ST in iter req ctrl chunk; do
+    F=$TRACE_DIR/qps_sweep_${cfg}_${ST}.jsonl
+    [[ -f $F ]] && cp "$F" "$d/tdm_trace/qps_sweep_${cfg}_${ST}.jsonl" || true
+  done
+}
+
+mkdir -p "$OUT"
+echo "### F5b A1 (dh_chunk1) started $(date '+%H:%M:%S')"
+for P in sarathi pdtdm; do
+  run_tuple "$P"
+done
+echo "### F5b A1 done $(date '+%H:%M:%S')"

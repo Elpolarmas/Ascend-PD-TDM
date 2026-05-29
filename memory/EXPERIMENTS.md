@@ -6,110 +6,115 @@
 
 ## 1. 实验代次时间线
 
-| 代次 | 时间 | 内容 | 输出 |
+| 代次 | 时间 | 内容 | 输出目录 |
 |---|---|---|---|
 | P0 | ~4 月 | exp_a-f 早期 profile(ACL Graph / P-D 资源画像 / DCMI 开销 / 并发扩展 / Unified vs Phased / Graph-aware) | `figures/fig{1-7}_exp_*.png`(数据已删) |
 | P0-1 | 5/6 | static ratio scan | `static_scan_3a/` |
-| P0-2 | 5/8 | 8K canonical M 家族 sweep | 数据已删,finding 进入 `FINDINGS.md` |
-| P0-3 | 5/7 | 长 prompt SLO grid sweep(thesis 双 pivot 起点) | `long_prompt_sweep/` |
 | P1.0 / P1.0b | 5/12 | Graph capture audit(FFTS+ vs AIV) | `baseline_c3_audit{,_aiv}/` |
 | P1.4 | 5/11 | Azure trace 4-way 主结果 | `azure_main/` |
 | P1.5 | 5/12 | 跨窗扩展 | `azure_p15/` |
-| P1.6a | 5/13 | PID 屏蔽审计 + 信号滞后量化 | `p16a_audit_summary.txt` |
-| P1.6b | 5/13 | 反馈链 F1+F2 修复 | `azure_p16b/`, `p16b_summary.txt` |
-| P1.6e | 5/13 | SLO 档 sweep(4 档) | `azure_p16e/`, `p16e_summary.txt` |
-| P1.7 | 5/12 | 单向 urgency 实验(FAIL) | `azure_p17/` |
-| **P1.8** | 5/14 | m31_fia ablation:M3.1 强制走 FIA vs 原 m31_2048 vs C3,拆 kernel 贡献 vs phase-pure 贡献 | `azure_m31_fia_ablation/` |
-| stationary 长 prompt | 5/11 | 5-way stationary(C1/M1+chunk/M27/M31/C3) | `long_5way_q1632/` |
-| chunk pareto | 5/9 | chunk_tokens 静态扫参 | `p1_chunk_scan/` |
-| burst 合成 | 5/8 | 合成 fast/slow burst | `burst_seed{0,1,2}/`, `burst_slow_seed{0,1,2}/` |
-| **P1.6h** (pending) | — | calibrated SLO 重跑主结果 baseline | 推迟到 P1.7b 阶段合并跑(D-001) |
-| **P1.7b** | 5/15 | 双向 selector smoke + threshold sweep(starv ∈ {2.0,3.0,5.0})| `azure_p17b/` — **触发率 0-1%,conv 上微赢不归因到机制,code 上 M3.3 default -2.84pp 输 M3.1。当前实装不能直接落地,待诊断** |
-| **P1.9a** (pending,D-010) | — | M1 静态 ratio∈{0.05..ratio_max} 扫描 vs M3.1 | **可立即跑**,不依赖新代码。支撑慢回路角色重定位(claim B1)。两种结果都对 thesis 有用 |
-| **P1.9b** (pending,D-010) | — | mixed_mode ablation:TDM mixed_mode on/off,同 stack 验证 phase-pure 机制级贡献 | 依赖 `TDMConfig.mixed_mode` 开关实装(interfaces.md 缺口 #5)。支撑 claim A |
-| **P1.9c** (pending,D-010) | — | 双维度协同:M3.1(只慢)vs M3.1+P1.7b(慢+快)vs 只快回路 | 依赖 P1.7b 实装。支撑 claim B3(双维度协同) |
+| P1.6e | 5/13 | SLO 档 sweep(4 档) | `azure_p16e/` |
+| **Phase 0 T3** | 5/20 | Micro-benchmark ideal latency(D-012) | `phase_a_micro_ideal/` |
+| **Phase 0 T4** | 5/20 | H2 PID saturation diagnostic | `phase_a_h2_ratiomax/` |
+| **Phase 0 T2** | 5/20 | Post-hoc B 4-way interference coords | `azure_p15/interference_coords.json` |
+| **Phase 1 T5** | 5/20 | Trace-sampled QPS sweep(已完成,被 T6 取代) | `phase_1_t5_qps_sweep/` |
+| **Phase 1 T6** | 5/22 启动 / 5/24 bug 发现 / 5/25 m31-fix 重跑完成 | T6 burst goodput sweep(c1/c3/m31) | `phase_2_t6_burst_goodput/*_nonpid/`(c1/c3)+ `c3_chunk2048_supplement/`(c3-fair)+ `m31fix_validate/`(m31-fix) |
+| **5/24 bug fix** | 5/24 | `chunked_schedule.py` waiting-loop bug fix(Diff #6) | D-013 |
+| **5/25 cleanup** | 5/25 | 删除中间 / 废弃数据 ~720M | — |
 
 ---
 
-## 2. 主线 results/ 目录(17 个)
+## 2. 当前 active results/ 目录(paper-relevant)
 
 | 目录 | 代次 | 配置 / 规模 | 主 finding | thesis 用途 |
 |---|---|---|---|---|
-| `azure_main/` | P1.4 | 2 traces × 4 cfg × 3 seeds × 60s, strict SLO | M3.1 在 tpot=200ms 档 conv +5.2pp vs M1+chunk,code +9.4pp vs C3;但 conv tpot=150ms 档输 C3 4.5pp | **主结果(临时)**——SLO 档不符合「不能偏离 §2」,P1.7b 阶段用调过的档重跑 |
-| `azure_p15/` | P1.5 | 2 traces × 3 windows × 4 cfg × 3 seeds | conv 4/4 tier 跨窗 Δ(M3.1, M1+chunk) PASS;code 严档 tpot=100/150 跨窗 Δ≈0 | 跨窗稳定性 ablation,motivate P1.7b 救饱和场景 |
-| `azure_p16b/` | P1.6b | 1 cfg × 短 sweep,F1+F2 修后 | ttft warm 从 16.5s 降到 2.0s,但 tpot 信号一上线 100% 违例 | finding 来源(反馈链不是根因,SLO 档错才是),不进主表 |
-| `azure_p16e/` | P1.6e | M3.1 × 4 SLO 档 × 2 windows × 3 seeds | conv M2.4 屏蔽 99.5% → 5.4% 跨 4 档,但 ratio 仍钉 max 80%+;**SLO 校准必要但不充分** | thesis 调整核心证据(支撑 D-002 / D-003) |
-| `azure_p17/` | P1.7 | M3.2 单向 urgency vs M3.1 | 8/8 严档 7 个 Δ<0 | 反例,motivate P1.7b 双向 selector |
-| `azure_m31_fia_ablation/` | P1.8 | 4 cfg × 2 traces × 3 seeds × 60s,新加 `c2_tdm_m31_fia`(M3.1 强制走 FIA) | kernel Δ ≈ 0(≤ 13ms / < 1%);M3.1 vs C3 差距 86-101% 是 **TDM-paradigm vs CP-paradigm bundle 总差**(D-010 修正:不归因到 phase-pure 单变量);phase-pure 双刃 — TTFT 赢但 code TPOT_p99 输 C3 992ms (2.5×) | thesis narrative 重写(D-009 + D-010):kernel 移出 contribution,phase Δ 改 paradigm-level 表述,phase-pure 单变量验证待 mixed_mode ablation(P1.9b) |
-| `azure_p17b/` | P1.7b | 5 cfg(M3.1/M3.2/M3.3 default/starv2/starv5)× 2 traces × 3 seeds × 60s。M3.3 = M3.1 + 双向 urgency_ttft + starvation_tpot | starvation_tpot 触发率 0-1%(0% on code default);conv +1.86pp 但归因不实(starv5 0% 触发反而 +2.48pp);code default -2.84pp 净退步;source 字段 max_slice 25%→50% 暗示间接副作用 | **claim B2/B3 当前缺数据支撑**,待诊断三条方向(任务 #24/#25/#26) |
-| `baseline_c3_audit/` | P1.0 | C3 default FFTS+ 15 sizes | C3 baseline 数据 | Graph 模块降级证据之一(D-005) |
-| `baseline_c3_audit_aiv/` | P1.0b | C3 AIV 23 sizes vs FFTS+ 15 | 23 sizes 反而 -1.5~-23.8pp,capture 数量非单调 | 同上,**没有算法空间**结论的关键证据 |
-| `static_scan_3a/` | P0-1 | M1 static ratio ∈ {0.05..0.8} | regime-dependent 最优 ratio:R2(qps=16)≈0.27,R3(qps=32)≈0.05 | thesis motivate:单一全局最优 ratio 不存在 |
-| `long_5way_q1632/` | 5/11 | 5-way × q∈{16,32} × stationary 长 prompt | M3.1 vs M1 stationary +0.9/+0.3pp(弱) | negative finding:PID 在 stationary 不显效,thesis 写作要避谈 stationary 主胜 |
-| `long_prompt_sweep/` | P0-3 | 4 configs × post-hoc SLO grid | strict/loose 都看不出差异;区分带 ttft∈[500,1500] × tpot∈[100,200] M2.7 一致胜 | **Sampling 模块的核心 motivation** + thesis 双 pivot 起点 |
-| `p1_chunk_scan/` | 5/9 | chunk_tokens ∈ {512..8192} | chunk pareto 单调,chunk=2048 是 sweet spot | confirm 不做 dynamic chunk controller(D-006) |
-| `burst_seed{0,1,2}/` | 5/8 | 合成 fast burst × 3 seeds | PID Δ ≈ ±0.7pp | negative finding:合成 burst 撬不动 PID,thesis 不报 |
-| `burst_slow_seed{0,1,2}/` | 5/8 | 合成 slow burst × 3 seeds | 同上 | 同上 |
+| `phase_a_micro_ideal/` | T3 (D-012) | Qwen3-8B × 2 wld × 3 seed × N=50,concurrent=1 sequential | conv ideal_ttft_p99=415ms / tpot_p99=23.4ms;code 684/24.9ms。SLO 4 档 = ideal × {5,10,15,25}× | **paper SLO grid 数据源**,Sarathi-Serve protocol 同款 |
+| `phase_a_h2_ratiomax/` | T4 fallback (D-012) | m31_2048 × slo-ratio-max=0.95 × conv off1860/2160 × 3 seed | off1860 PID 钉新 ceiling 0.95 → H2 mechanism-saturated 确认 | H2 verified;L3 narrative 保住 |
+| `azure_p15/interference_coords.json` | T2 (D-012) | post-hoc 4 cfg × 2 wld × 3 seed pool | 4-quadrant defining figure: c1=右上 / m1+chunk=左下 / m31=左上 / c3=右下 | paper S5.3 defining figure 数据 |
+| **`m31fix_validate/`** | **Phase 1 T6 m31-fix (D-013)** | **m31 × 2 wld × 7 k × 3 SLO × 3 seed = 126 cells** | **paradigm-level 全胜 c3-fair**(conv 21/21,code 9 decisive + 11 tied + 0 loss);详 `T6_FINDINGS.md` | **paper Section 5 主图数据源**(winning region heatmap + Pareto frontier) |
+| **`c3_chunk2048_supplement/`** | T6 Sarathi (D-013) | c3 × chunk=2048 × 2 wld × 7 k × 3 seed = 42 cells | **= Sarathi chunked prefill baseline**(D-014 重命名),post-hoc reclassify 多 SLO | **paper Section 5 主对手 baseline** |
+| **`phase_2_t6_burst_goodput/*_nonpid/`** | T6 c1 + Vanilla CB (D-013/014) | c1 + c3 × 2 wld × 7 k × 3 seed = 42 dirs(每个含 c1 + c3 两 cfg) | **`c3_cp_qps0.0.json` 文件 = Vanilla CB baseline**(D-014 重命名;chunk=8192 + Azure prompt cap=7000 → chunk 不触发 = mixed batch 真 vanilla CB);**`c1_baseline_qps0.0.json` = c1 phase-pure(D-014 后 paper 不主报)** | **paper Section 5 Vanilla CB baseline**(D-014);c1 数据保留 internal |
+| **`c4_pd_supplement/`** | **T6 c4_pd 4-way (5/25)** | **c4_pd × 2 wld × 7 k × 3 seed = 42 cells**(1P1D, prefill@NPU0 TP=1 + decode@NPU1 TP=1 + proxy@8000) | **全谱 dominated**(TTFT 灾难,low load 472ms → high load 63,663ms);**TPOT 70ms 全员最好** → 1P1D static partitioning fundamental cost,详 `T6_FINDINGS.md` § c4_pd 4-way 补完 | paper 4-way 补完(D-011 commitment),c4_pd 紫线 |
+| **`c4_pd_steady_smoke/`** | **c4_pd Poisson 对照 (5/25)** | c4_pd × conv × 3 QPS(2.85/5.70/7.98) × seed 0,arrival_mode=trace_sampled(Poisson IID) | **推翻 "burst 是 c4_pd 放大器" 假设**:steady 在 high load 反而比 burst TTFT 略差。证明 1P1D fundamental capacity 才是真凶,burst 仅 10-20% overhead | paper Section 5 caveat:c4_pd 在 2-NPU 数学上 capacity 不够,不是 burst-driven |
+| **`c3_telemetry/`** | **c3 iter telemetry (5/25)** | c3-fair × code k=2.8/4.9 seed 0,scheduler.py passive 模式 patch 后 record_iter | **直接量化 mechanism #1**:c3 chunk-cap mixed iter mean 220ms vs m31 prefill iter 150ms(same 2048 budget,2.16 vs 31.5 reqs)→ **mixed-attention overhead +70ms/iter**;c3 median mixed iter 208ms vs m31 cycle 189ms(+10%) | paper Section 5 mechanism evidence(物理推理 → telemetry 直接证据) |
+| `phase_2_post/m31fix_phase1_pointwise.json` | Phase 1 aggregate | 3-seed median,4 cfg × 2 wld × 3 SLO × 7 k | 主聚合数据(已含 c4_pd) | post-hoc 出图 / cite 数据用此 |
+| `azure_main/` | P1.4 | 2 traces × 4 cfg × 3 seeds × 60s | 早期 strict SLO 主结果 | 历史(SLO 档已升级,T6 取代);保留作 reference |
+| `azure_p15/` | P1.5 | 2 traces × 3 windows × 4 cfg × 3 seeds | 跨窗稳定性 + interference_coords | T2 defining figure 数据源(`interference_coords.json`) |
+| `phase_1_t5_qps_sweep/` | Phase 1 T5 | 3-way × QPS{2..16} × {conv,code} × 3 seed × m31×4 SLO = 288 run | Poisson IID + 5× SLO 双重 dilute paradigm Δ | 不进主图,被 T6 burst 取代;保留作 sanity reference |
+| `static_scan_3a/` | P0-1 | M1 static ratio ∈ {0.05..0.8} | regime-dependent 最优 ratio | thesis motivate:单一全局最优 ratio 不存在 |
 | `tdm_trace/` | 基础设施 | 空目录,每次 run 重新填中间 jsonl | 不汇总 finding | 工具目录 |
-
-### 摘要文件
-- `p16a_audit_summary.txt` — P1.6a 屏蔽审计的离线分析摘要
-- `p16b_summary.txt` — P1.6b 反馈链修复摘要
-- `p16e_summary.txt` — P1.6e SLO 档 sweep 摘要
-
-### 各代次 orchestrator log
-- `azure_p15_orchestrator.log` / `azure_p16b_orchestrator.log` / `azure_p16e_orchestrator.log` / `azure_p17_orchestrator.log`
-- `long_5way_q1632.log` / `p1_chunk_scan_run.log`
 
 ---
 
-## 3. 已废弃实验(不再跑,数据已删)
+## 3. 已废弃实验(2026-05-25 cleanup 已删除)
 
-| 类别 | 名称 | 废弃理由 | 替代 |
-|---|---|---|---|
-| 早期 profile | exp_a-f(`results_exp_*.json`) | 跟 PD-TDM 主线无直接关系 | figures/fig{1-7}_exp_*.png 保留 |
-| M2.X PID 演化 | `m2_slo_adaptive`、`m21-m25_slo_adaptive`、`m26_m27_slo_adaptive` | 已被 azure_main 4-way 替代;M2 各 guard 实测无效或装饰 | `azure_main/` + `FINDINGS.md` M2.X 节 |
-| M3.1 早期 | `m31_5way_*`、`m31_chunksize_scan`、`m31_mixed_qps16`、`m31_samesweep_validation`、`mixed_workload_sweep`、`azure_l2_conv60s` | 早期单 seed 探索,已被 azure_main + p1_chunk_scan 替代 | `azure_main/` + `p1_chunk_scan/` |
-| chunk 早期 | `m1_chunk_seed*`、`long_chunk_seed*` | 早期 smoke,被 p1_chunk_scan + long_5way_q1632 替代 | `p1_chunk_scan/` + `long_5way_q1632/` |
-| qps sweep 早期 | `qps_sweep`、`_v2`、`_v3`、`_2k_y`、`_2k_y_c4`、`_8k`、`_8k_c3`、各 `_dryrun`、`_streamcheck`(11 个) | 早期版本迭代 | `azure_main/` |
-| smoke | `azure_smoke`、`m2_smoke`、`m3_smoke`、`m2_y_plan_2k` | 开发期 smoke | — |
-| P1.6 sensitivity sweep | P1.6f(target_violation)、P1.6g(ratio_max)、P1.6i(chunk on azure)| 方向已定 P1.7b,sensitivity 价值降级 | D-004 |
+| 目录 / 类别 | 废弃理由 | 替代 |
+|---|---|---|
+| `phase_2_t6_burst_goodput/*_pid/`(168 m31 cells) | **chunked_schedule waiting-loop bug**;数据全部不可信(D-013) | `m31fix_validate/` |
+| `azure_m31_fia_ablation/` | 带 bug + kernel ablation 已从 contribution 移除(D-009) | 若 future 需 kernel ablation,fix 后重跑 |
+| `long_prompt_smoke/` + `long_prompt_smoke_fix/` | 5/23 bug 假象 smoke + 5/24 fix 验证;关键数字已落 D-013 | — |
+| `long_prompt_sweep/` | 早期 long-prompt 探索 | — |
+| `long_5way_q1632/` + log | 长 prompt 5-way 探索(基于错误前提) | — |
+| `c3_chunk_smoke/` | 早期 c3 smoke | `c3_chunk2048_supplement/` |
+| 早期 profile `exp_a-f` | 跟 PD-TDM 主线无直接关系 | `figures/fig{1-7}_exp_*.png` 保留 |
+| M2.X PID 演化(`m2_slo_adaptive`、`m21-m27_slo_adaptive`) | 已被 azure_main 4-way 替代 | `azure_main/` |
+| M3.1 早期(`m31_5way_*`、`m31_chunksize_scan` 等) | 单 seed 探索,已被替代 | `azure_main/` + `p1_chunk_scan/`(已删) |
+| chunk 早期(`m1_chunk_seed*`、`long_chunk_seed*`) | 早期 smoke | `p1_chunk_scan/`(已删)/ `long_5way_q1632/`(已删) |
+| qps sweep 早期(11 个变体) | 早期版本迭代 | `azure_main/` |
+| smoke(`azure_smoke`、`m2_smoke`、`m3_smoke` 等) | 开发期 smoke | — |
+| P1.6 sensitivity sweep(P1.6f/g/i) | sensitivity 价值降级 | D-004 |
+| `baseline_c3_audit{,_aiv}` | Graph 模块降级证据,findings 已 fold | `FINDINGS.md` |
+| `burst_seed{0,1,2}/` + `burst_slow_seed{0,1,2}/` | 合成 burst 撬不动 PID,negative finding | — |
+| `azure_p16{a,b,e}/` + `azure_p17{,b}/` | M2/M3 演化中间数据 | 已 fold 进 D-007/D-008/D-009/D-010 |
 
 ---
 
 ## 4. 实验启动 / 数据落盘约定
 
-### 启动方式
+### 启动方式(T6 burst goodput sweep,paper main)
 
 ```bash
-# 跑 sweep(必须从 /tmp 启 vllm,避开 namespace 陷阱)
 cd /vllm-workspace/Ascend-PD-TDM/experiments
-/usr/local/python3.11.13/bin/python3 run_qps_sweep_all.py \
-  --configs <config_list> \
-  --qps 16,32 --duration 60 --warmup 20 \
-  --max-model-len 8192 --max-num-batched-tokens 8192 \
-  --outdir /vllm-workspace/Ascend-PD-TDM/results/<run_name>
+# c1/c3 nonpid(原 T6 driver)
+bash run_phase_2_t6_burst_goodput.sh
+# c3-fair chunk=2048 单独跑
+bash run_c3_chunk2048_supplement.sh
+# m31-fix(Phase 1 sweep,需要 fix 版 chunked_schedule.py)
+bash /tmp/run_m31fix_phase1.sh
+# c4_pd 4-way 补完(1P1D disagg sweep,支持断点续跑)
+bash experiments/run_c4_pd_supplement.sh
+# c4_pd Poisson 对照(3 cells,~12 min)
+bash experiments/run_c4_pd_steady_smoke.sh
+# c3 iter telemetry(2 cells,~10 min,需要 scheduler.py passive 模式 patch 已 in place)
+bash experiments/run_c3_telemetry.sh
 ```
 
-### 关键 config
+### 关键 config(`run_qps_sweep_all.py` 内定义)
 
-| 名字 | 含义 |
+| 内部 config 名 | Paper 名(D-014 后) | 含义 | server max_num_batched_tokens |
+|---|---|---|---|
+| `c1_baseline` | ~~(不进 paper)~~ | AscendScheduler unified(NPU-specific admit-driven phase-pure) | 8192 |
+| `c2_tdm_m31_2048` (M3.1) | **PD-TDM (ours)** | PD-TDM phase-pure + prefill_chunk_tokens=2048 + PID | 8192(实际死代码) |
+| `c3_cp` + chunk=2048 | **Sarathi chunked prefill** | vLLM 默认 chunked prefill + chunk=2048 = mixed batch + 触发 chunking | 2048 |
+| `c3_cp` + chunk=8192 | **Vanilla CB** | vLLM chunked prefill 路径 + chunk=8192;Azure prompt cap=7000 < 8192 → chunk 不触发 = 真 mixed batch vanilla CB(D-014) | 8192 |
+| `c4_pd` | c4_pd 1P1D disagg reference | PD 分离 1P1D | — |
+
+**Aggregate JSON 列名**(`m31fix_phase1_pointwise.json` 内,2026-05-26 D-014 加 vanilla_cb 后):
+| 列名 | Paper 名 |
 |---|---|
-| `c1_baseline` | AscendScheduler 原版 + tracker(passive 模式) |
-| `c2_tdm` (M1) | 静态 ratio=0.30 |
-| `c2_tdm_m27` (M2.7) | SLO 反应式 PID + 全部 guard |
-| `c2_tdm_m31_2048` (M3.1) | M2.7 + prefill_chunk_tokens=2048 |
-| `c2_tdm_m31_fia` | M3.1 + `force_fia_attention=True`(monkey-patch 让 attention 走 FIA,P1.8 ablation 用,等价 vllm-ascend v0.13+) |
-| `c3_cp` | vLLM 默认 chunked prefill(C3 对手) |
-| `c4_pd` | PD 分离 1P1D(备用,2 卡) |
+| `vanilla_cb` | Vanilla CB(老 c3 chunk=8192) |
+| `c3_cp` | Sarathi chunked prefill(c3-fair chunk=2048) |
+| `c2_tdm_m31_2048_fix` | PD-TDM |
+| `c4_pd` | c4_pd 1P1D disagg reference |
+| `c1_baseline` | (D-014 后 paper 不主报,数据保留) |
+| `c2_tdm_m31_2048_bug` | (D-013 已废弃 m31 PID bug 版,数据已删,列全 -) |
 
-### 出图 / posthoc
+### Post-hoc
 
 ```bash
-/usr/bin/python3 experiments/posthoc_<name>.py ...
+/usr/local/python3.11.13/bin/python3 experiments/posthoc_m31fix_phase1.py
+# 输出 winning region + bug vs fix + per-cell 全 metric 详细
 ```
-
-各 posthoc 脚本对应一次 sweep 或一次 finding 链节点。
 
 ### 单测(不依赖 NPU)
 
@@ -119,14 +124,14 @@ cd /tmp && /usr/local/python3.11.13/bin/python3 -m vllm_ascend.core.tdm.tests._r
 
 ---
 
-## 5. 评估口径约定
+## 5. 评估口径约定(D-012/D-013 finalize)
 
-- **SLO 默认:** TTFT < 500ms, TPOT < 50ms(strict,**不用于主报**);conv 调过的档:tpot=200ms / ttft=1500ms
-- **Goodput:** `status==200 ∧ ttft_ms<SLO_ttft ∧ tpot_ms_mean<SLO_tpot` 的 output_tokens 总和 / 稳态窗口
-- **meet_slo%:** 命中 SLO 的请求数 / 窗口内总请求数
-- **passive_tracker 模式:** 对照 config 都走 TDMScheduler 但 `enable_tdm=False`,只跑 tracker → 测量口径完全一致
-- **3 seeds ± std 描述性;临界结果(±1pp 内)扩 5 seeds**
-- **窗口:** `[20s, 60s]`(warmup 后)
+- **主指标**:max sustainable QPS at meet ≥ 90% under (TTFT_p99 < SLO_ttft) AND (TPOT_p99 < SLO_tpot)
+- **次指标**:SLO meet% at fixed QPS;latency mean/p99
+- **SLO grid**:Sarathi 风格 × {5, 10, 15, 25}× × micro-benchmark ideal(T6 实际用 {5, 10, 15}×,s4=25× 已弃)
+- **passive_tracker 模式**:c1/c3 都走 TDMScheduler 但 `enable_tdm=False`,只跑 tracker → 测量口径完全一致
+- **3 seeds median**(临界结果扩 5 seeds)
+- **窗口**:T6 用 `[30s, 90s]`(warmup 30 + measurement 60)
 
 ---
 
@@ -137,5 +142,6 @@ cd /tmp && /usr/local/python3.11.13/bin/python3 -m vllm_ascend.core.tdm.tests._r
 3. 不做什么?边界
 4. 预期 wall 时间?预算
 5. 数据落盘在 `results/<run_name>/`,新增一行到本台账
+6. **跑 m31 前先确认 `chunked_schedule.py` 是 fix 版**(Diff #6 in place)
 
 跑完回填:**结果** / **影响 finding** / **thesis 用途**。

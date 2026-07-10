@@ -167,6 +167,10 @@ vllm-ascend = **v0.11.0rc1**,CANN 8.3.rc1,torch-npu 2.7.1。所有实验/论文�
 | 实验 driver | `Ascend-PD-TDM/experiments/` |
 | 实验数据 | `Ascend-PD-TDM/results/` |
 | Paper outline 起草 | `Ascend-PD-TDM/memory/design/paper.md`(W2 起重写)|
+| **MaaS 聚合 trace 回放** | `experiments/lib/workload.py`(`AggregatedTraceReplay`—读 1-minute aggregated CSV)|
+| **MaaS rpm_scale smoke** | `experiments/smoke_rpm_scale.sh`(饱和边界扫频)|
+| MaaS 数据 | `data/maas/aggregated_curve.csv`(1140 分钟,2026-03-03)|
+| 正式 MaaS 回放实验 | 待建(`experiments/run_maas_replay.sh`) |
 
 ---
 

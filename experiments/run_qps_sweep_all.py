@@ -36,6 +36,7 @@ import httpx
 # 让 `from lib.workload import ...` 可用（与 qps_sweep.py 同级 import）
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.workload import (  # noqa: E402
+    AggregatedTraceReplay,
     DEFAULT_PROMPT_PROFILE,
     PROMPT_PROFILES,
     resolve_prompt_profile,
@@ -841,6 +842,7 @@ def run_one_qps(
     trace_max_prompt_tokens: int | None = None,
     trace_max_output_tokens: int | None = None,
     num_samples: int = 50,
+    rpm_scale: float = 1.0,
     slo_ttft_ms: float = SLO_TTFT_MS,
     slo_tpot_ms: float = SLO_TPOT_MS,
 ) -> dict | None:
@@ -937,6 +939,20 @@ def run_one_qps(
             cmd.extend(["--trace-max-prompt-tokens", str(trace_max_prompt_tokens)])
         if trace_max_output_tokens is not None:
             cmd.extend(["--trace-max-output-tokens", str(trace_max_output_tokens)])
+    elif arrival_mode == "aggregated_trace":
+        if not trace_file:
+            raise ValueError(
+                "--arrival-mode=aggregated_trace requires --trace-file "
+                "(pointing to the 1-min aggregated CSV)")
+        cmd.extend([
+            "--arrival-mode", "aggregated_trace",
+            "--trace-file", str(trace_file),
+            "--rpm-scale", str(rpm_scale),
+        ])
+        if trace_time_scale != 1.0:
+            cmd.extend(["--trace-time-scale", str(trace_time_scale)])
+        if trace_start_offset:
+            cmd.extend(["--trace-start-offset", str(trace_start_offset)])
     # c4_pd 没 server tracker，必须开 streaming 让 client 自测 TTFT/TPOT
     if config_name == "c4_pd":
         cmd.append("--stream")

@@ -629,6 +629,200 @@ class TraceSampledBurst(WorkloadSource):
 
 
 # ---------------------------------------------------------------------------
+# AggregatedTraceReplay — MaaS-style 1-minute aggregated CSV playback
+# ---------------------------------------------------------------------------
+
+
+class AggregatedTraceReplay(WorkloadSource):
+    """Replay from a 1-minute aggregated trace CSV.
+
+    CSV format (4 columns):
+      timestamp, original_rpm, original_prompt_token, original_completion_token
+
+    Each row represents one minute: ``original_rpm`` requests arriving within
+    that 60-second bucket, collectively consuming ``original_prompt_token`` and
+    ``original_completion_token``.  The class **disaggregates** each bucket into
+    per-request ``Request`` objects with uniform inter-arrival spacing.
+
+    Parameters
+    ----------
+    trace_csv : str
+        Path to the aggregated CSV.
+    duration_s : float
+        Stop replay after this many seconds of trace clock time.
+    rpm_scale : float
+        Scale factor applied to *every* bucket's RPM.  ``0.02`` = 2% of
+        original RPM.  Default 1.0 (original intensity).
+    start_offset_s : float
+        Skip the first *start_offset_s* seconds of the trace.
+    seed : int
+        Controls filler-word generation; arrival spacing is deterministic.
+    time_scale : float
+        >1 accelerates replay, <1 slows it.  Default 1.0.
+    """
+
+    def __init__(
+        self,
+        trace_csv: str,
+        duration_s: float,
+        rpm_scale: float = 1.0,
+        start_offset_s: float = 0.0,
+        seed: int = 0,
+        time_scale: float = 1.0,
+        max_model_len: int = 8192,
+        subsample_step: int = 1,
+        compress_timeline: bool = False,
+    ) -> None:
+        if rpm_scale <= 0:
+            raise ValueError(f"rpm_scale must be > 0, got {rpm_scale}")
+        if time_scale <= 0:
+            raise ValueError(f"time_scale must be > 0, got {time_scale}")
+        if duration_s <= 0:
+            raise ValueError(f"duration_s must be > 0, got {duration_s}")
+        if max_model_len <= 0:
+            raise ValueError(f"max_model_len must be > 0, got {max_model_len}")
+        if subsample_step < 1:
+            raise ValueError(f"subsample_step must be >= 1, got {subsample_step}")
+        self.trace_csv = trace_csv
+        self.duration_s = duration_s
+        self.rpm_scale = rpm_scale
+        self.start_offset_s = start_offset_s
+        self.seed = seed
+        self.time_scale = time_scale
+        self.max_model_len = max_model_len
+        self.subsample_step = subsample_step
+        self.compress_timeline = compress_timeline
+
+    @property
+    def name(self) -> str:
+        base = self.trace_csv.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+        scale = f"_rpm{self.rpm_scale:g}" if self.rpm_scale != 1.0 else ""
+        dur = f"_dur{int(self.duration_s)}s"
+        return f"agg_trace_{base}{scale}{dur}"
+
+    def _load(self) -> list[tuple[float, int, int]]:
+        """Read aggregated CSV → list of (bucket_start_s, rpm_scaled, avg_p, avg_o).
+
+        Each row produces *rpm_scaled* requests uniformly spaced across the
+        60-second bucket.  avg_p / avg_o are rounded to int.
+        """
+        import csv
+        from datetime import datetime
+
+        raw: list[tuple[float, float, int, int]] = []  # (t_s, rpm_orig, pt, ot)
+        with open(self.trace_csv, "r", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                raw_ts = row["timestamp"].strip()
+                try:
+                    t = float(raw_ts)
+                except ValueError:
+                    t = datetime.fromisoformat(raw_ts).timestamp()
+                rpm_s = row["original_rpm"].strip()
+                pt_s = row["original_prompt_token"].strip()
+                ot_s = row["original_completion_token"].strip()
+                if not rpm_s or not pt_s or not ot_s:
+                    continue  # skip rows with missing data
+                rpm = float(rpm_s)
+                pt = int(float(pt_s))
+                ot = int(float(ot_s))
+                if rpm <= 0 or pt <= 0 or ot <= 0:
+                    continue
+                raw.append((t, rpm, pt, ot))
+        if not raw:
+            raise ValueError(f"no rows in {self.trace_csv}")
+        raw.sort(key=lambda r: r[0])
+        # Subsample: take every Nth row for trace compression
+        if self.subsample_step > 1:
+            raw = raw[::self.subsample_step]
+        if not raw:
+            raise ValueError(f"no rows after subsample_step={self.subsample_step}")
+        t0 = raw[0][0]
+        buckets: list[tuple[float, int, int, int]] = []
+        for t, rpm, pt_total, ot_total in raw:
+            t_rel = t - t0
+            rpm_scaled = max(1, round(rpm * self.rpm_scale))
+            avg_p = max(1, round(pt_total / rpm))
+            avg_o = max(1, round(ot_total / rpm))
+            # Clamp to avoid exceeding server max_model_len.
+            # Leave 512-token headroom for tokenizer count mismatch.
+            max_ctx = self.max_model_len - 512
+            if avg_p + avg_o > max_ctx:
+                avg_p = max(1, max_ctx - avg_o)
+            buckets.append((t_rel, rpm_scaled, avg_p, avg_o))
+        # Optional timeline compression: after subsampling, reassign
+        # sequential t_rel so buckets are adjacent (60s apart) instead
+        # of preserving original inter-bucket gaps.
+        if self.compress_timeline:
+            buckets = [(i * 60.0, rpm, avg_p, avg_o)
+                       for i, (_, rpm, avg_p, avg_o) in enumerate(buckets)]
+        return buckets
+
+    def iter_buckets(self) -> Iterator[list[Request]]:
+        """Yield one minute-bucket at a time.
+
+        Each bucket is a list of Request objects belonging to that minute.
+        The caller should process all requests within a bucket before pulling
+        the next one.  This bounds concurrent asyncio tasks to at most one
+        minute's worth (~ hundreds, not hundreds of thousands).
+
+        Per-request prompt / output lengths are sampled from a log-normal
+        distribution whose mean is the bucket-average token count.  This
+        produces a realistic mix of short and long prompts within each
+        bucket rather than the worst-case uniform-heavy workload.
+        """
+        import math
+
+        buckets = self._load()
+        rng = random.Random(self.seed)
+        win_end = self.start_offset_s + self.duration_s
+        max_ctx = self.max_model_len - 512
+        sigma = 0.35  # log-normal σ; moderate spread, avoids excessive truncation
+        # With σ=0.35: p50≈0.94×mean, p95≈1.8×mean, p99≈2.3×mean
+        emitted = 0
+
+        for t_bucket, rpm, avg_p, avg_o in buckets:
+            if t_bucket + 60 <= self.start_offset_s:
+                continue
+            if t_bucket >= win_end:
+                break
+            batch: list[Request] = []
+            gap = 60.0 / rpm
+
+            # Pre-compute log-normal μ for this bucket's prompt / output
+            # (log(0) is -∞, so floor at 1)
+            mu_p = math.log(max(1, avg_p)) - sigma * sigma / 2.0
+            mu_o = math.log(max(1, avg_o)) - sigma * sigma / 2.0
+
+            for i in range(rpm):
+                t_rel = (t_bucket + i * gap - self.start_offset_s) / self.time_scale
+                if t_rel < 0:
+                    continue
+                if t_rel >= (win_end - self.start_offset_s) / self.time_scale:
+                    break
+                # Sample per-request lengths from log-normal
+                sampled_o = int(rng.lognormvariate(mu_o, sigma))
+                sampled_o = max(1, min(sampled_o, 512))
+                sampled_p = int(rng.lognormvariate(mu_p, sigma))
+                sampled_p = max(1, min(sampled_p, max_ctx - sampled_o))
+                batch.append(Request(
+                    req_id=f"agg-{self.seed}-{emitted:06d}",
+                    arrival_time_s=t_rel,
+                    prompt=_make_prompt(sampled_p, rng),
+                    max_tokens=sampled_o,
+                    target_prompt_tokens=sampled_p,
+                ))
+                emitted += 1
+            if batch:
+                yield batch
+
+    def __iter__(self) -> Iterator[Request]:
+        """Flat iterator over all requests (backward-compatible)."""
+        for bucket in self.iter_buckets():
+            yield from bucket
+
+
+# ---------------------------------------------------------------------------
 # Sequential (concurrent=1) micro-benchmark sampler — Phase A ideal latency
 # ---------------------------------------------------------------------------
 

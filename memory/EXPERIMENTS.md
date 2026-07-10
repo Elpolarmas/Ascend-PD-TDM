@@ -21,6 +21,12 @@
 | **Phase 1 T6** | 5/22 启动 / 5/24 bug 发现 / 5/25 m31-fix 重跑完成 | T6 burst goodput sweep(c1/c3/m31) | `phase_2_t6_burst_goodput/*_nonpid/`(c1/c3)+ `c3_chunk2048_supplement/`(c3-fair)+ `m31fix_validate/`(m31-fix) |
 | **5/24 bug fix** | 5/24 | `chunked_schedule.py` waiting-loop bug fix(Diff #6) | D-013 |
 | **5/25 cleanup** | 5/25 | 删除中间 / 废弃数据 ~720M | — |
+| **MaaS smoke** | 6/30 | rpm_scale 0.02~0.40 sweep(20 档),pdtdm, Qwen3-0.6B, 180s window | `smoke_rpm_scale/` |
+| **MaaS 正式回放** | 6/30 23:14 启动 / 7/6 重做 | v3: full trace × rs=0.12 × pdtdm (17.4h, 68% err, PoolTimeout+ContextLength) / sarathi 未完成 | `maas_replay/` |
+| **MaaS v4-v6 调试** | 7/6 | 峰值窗口 (rs=0.15, start_offset=21600), Qwen3-8B, concur=4096→1024→64 | v4/v5: 高并发卡死; **v6: concur=64, pdtdm 5747 ok / 0 err / 100% meet / wall 84min** | `maas_replay/run_v{4,5,6}.log` |
+| **MaaS v7 分布长度** | 7/6 | log-normal σ=0.35 替代均匀 avg; rs=0.15, concur=64, peak 600s, pdtdm+sarathi | ✅ pdtdm 4336s / sarathi 4712s, 0 err, pdtdm TTFT -13% vs sarathi, wall -15% vs v6 | `maas_replay/run_v7_nohup.log` |
+| **MaaS v8-v10 配置迭代** | 7/7 | rs→0.10, subsample, compress_timeline | v8: 无压缩 trace 间隙; v9: 压缩但用 sampled CSV; v10: 全量 CSV subsample=10 | — |
+| **MaaS v11 (正式)** | 7/7 12:23 | **rs=0.10, concur=64, subsample=30, compress, 全量 CSV→38 buckets, 17.8K reqs** | pdtdm ✅ (11977s, 0 err, TTFT p99=1182ms, SLO=100%) / **sarathi running** | paper MaaS 评估主数据 |
 
 ---
 
@@ -43,6 +49,8 @@
 | `phase_1_t5_qps_sweep/` | Phase 1 T5 | 3-way × QPS{2..16} × {conv,code} × 3 seed × m31×4 SLO = 288 run | Poisson IID + 5× SLO 双重 dilute paradigm Δ | 不进主图,被 T6 burst 取代;保留作 sanity reference |
 | `static_scan_3a/` | P0-1 | M1 static ratio ∈ {0.05..0.8} | regime-dependent 最优 ratio | thesis motivate:单一全局最优 ratio 不存在 |
 | `tdm_trace/` | 基础设施 | 空目录,每次 run 重新填中间 jsonl | 不汇总 finding | 工具目录 |
+| **`smoke_rpm_scale/`** | **MaaS smoke (6/30)** | pdtdm × 20 档 rpm_scale(0.02~0.40),Qwen3-0.6B,180s | **找 PD-TDM 在真实流量下的饱和边界** | 正式 MaaS 实验 rpm_scale 定值 |
+| **`maas_replay/`** | **MaaS 系列 (7/1-7/7)** | v3: rs=0.12 失败 (68% err); v6: concur=64 稳定但 wall 8.4x; v7: 分布长度 -15% wall; **v11: rs=0.10 + subsample=30 + compress, pdtdm ✅ (3.3h, 0 err, 100% meet), sarathi running** | 真实 trace goodput 对比; v11 结果用于 paper MaaS 评估 |
 
 ---
 

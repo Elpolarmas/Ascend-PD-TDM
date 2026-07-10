@@ -100,6 +100,16 @@ Framing 净变化:
 
 详 `T6_FINDINGS.md` § c3 iter telemetry / § c4_pd 4-way 补完 / § c4_pd steady vs burst。
 
+## 跟进事项(MaaS 实验 — 7/7 最新)
+
+按优先级排序:
+
+- **P0 — MaaS v11 (正式, running)**:rs=0.10, concur=64, full trace × subsample=30 × compress_timeline → 38 buckets, 17.8K reqs。分布长度 (log-normal σ=0.35)。pdtdm ✅ (11977s, 0 err, TTFT p99=1182ms, SLO 100%) / **sarathi running**。nohup 后台,结果 `results/maas_replay/run_v11.log`。
+- **P0 — MaaS v11 结果分析 (pending)**:sarathi 完成后做 pdtdm vs sarathi goodput/latency 对比。关键发现:(1) concur=64 是 2-NPU 可靠上限;(2) 分布长度使 wall -15% vs 均匀;(3) subsample+compress 使 wall 从 3 天缩到 6h;(4) pdtdm TTFT 持续优于 sarathi。
+- **P0 — MaaS 方法总结**:模拟时间戳 `arrival_time_s = t_rel / time_scale`,驱动用 `asyncio.sleep` 在墙钟偏移 = arrival_time_s 时发请求。`compress_timeline` 把 subsample 后的 bucket 紧排成 60s 间隔 (i×60),消除原始 trace 空隙。
+- ~~P0 — MaaS smoke (6/30)~~ ✓:rpm_scale 0.02~0.40,找饱和边界,结果 `smoke_rpm_scale/`。
+- ~~P0 — MaaS v3-v7 调试 (7/6)~~ ✓:根因分析 + concur 调优 + 分布长度 + sarathi config 修复。详 EXPERIMENTS.md。
+
 ## 跟进事项(D-015 续 / F5b 更新)
 
 按优先级排序:

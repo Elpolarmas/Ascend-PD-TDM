@@ -26,6 +26,7 @@ import httpx
 
 from lib.metrics import aggregate_window, join, load_tracker_records
 from lib.workload import (  # noqa: F401
+    AggregatedTraceReplay,
     AzureTraceReplay,
     SequentialSampler,
     SyntheticBurst,
@@ -88,11 +89,15 @@ async def _send_one(
     records: list[ClientRecord],
     stream: bool,
     ignore_eos: bool = False,
+    sem: asyncio.Semaphore | None = None,
 ) -> None:
     # arrival_time 是相对 t0 的目标提交时刻；超时不补偿，落到记录里
     delay = req.arrival_time_s - (time.perf_counter() - t0)
     if delay > 0:
         await asyncio.sleep(delay)
+    # Acquire sem AFTER sleep — don't block the slot while sleeping
+    if sem is not None:
+        await sem.acquire()
     submit_ts = time.perf_counter()
     payload = {
         "model": model,
@@ -137,6 +142,9 @@ async def _send_one(
         rec.finish_ts = time.perf_counter()
         rec.status = -1
         rec.error = repr(e)[:200]
+    finally:
+        if sem is not None:
+            sem.release()
     records.append(rec)
 
 
@@ -245,14 +253,24 @@ async def run_driver(
                 await _send_one(client, model, req_now, fake_t0, records,
                                 stream, ignore_eos=ignore_eos)
         else:
+            # Streaming trace replay with bounded HTTP concurrency.
+            # For each request:
+            #   1. Sleep until its arrival_time_s (no slot used).
+            #   2. Wait for an HTTP pool slot (max_concurrency in-flight).
+            #   3. Create task with fake_t0 → _send_one skips sleep → sends.
             for req in workload:
+                delay = req.arrival_time_s - (time.perf_counter() - t0)
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                while len(tasks) >= max_concurrency:
+                    done, tasks = await asyncio.wait(
+                        tasks, timeout=5.0,
+                        return_when=asyncio.FIRST_COMPLETED)
+                    tasks = list(tasks)
+                fake_t0 = time.perf_counter() - req.arrival_time_s - 1.0
                 tasks.append(asyncio.create_task(
-                    _send_one(client, model, req, t0, records, stream,
+                    _send_one(client, model, req, fake_t0, records, stream,
                               ignore_eos=ignore_eos)))
-                # 让出控制权，使 sleep/调度真正并发
-                if len(tasks) % 32 == 0:
-                    await asyncio.sleep(0)
-            # 等所有任务结束（受 timeout 兜底）
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
         wallclock = time.perf_counter() - t0
@@ -286,7 +304,9 @@ def aggregate(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--qps", type=float, required=True)
+    parser.add_argument("--qps", type=float, default=0.0,
+                        help="Target QPS (ignored for trace/aggregated_trace "
+                             "modes where arrival rate comes from the trace)")
     parser.add_argument("--duration", type=float, default=90.0,
                         help="总时长 s（含 warmup）")
     parser.add_argument("--warmup", type=float, default=30.0,
@@ -330,7 +350,8 @@ def main() -> int:
     # "trace" = real workload replay (e.g. Azure LLM Inference Trace).
     parser.add_argument("--arrival-mode",
                         choices=["poisson", "burst", "trace", "sequential",
-                                 "trace_sampled", "trace_sampled_burst"],
+                                 "trace_sampled", "trace_sampled_burst",
+                                 "aggregated_trace"],
                         default="poisson",
                         help="sequential = concurrent=1 micro-benchmark, "
                              "samples --num-samples rows from --trace-file "
@@ -340,7 +361,10 @@ def main() -> int:
                              "prompt/output lengths sampled from --trace-file "
                              "rows (Phase 1 T5). trace_sampled_burst = burst "
                              "arrival (--burst-* params) + lengths from "
-                             "--trace-file (Phase 1 T5b).")
+                             "--trace-file (Phase 1 T5b). "
+                             "aggregated_trace = replay from 1-min aggregated "
+                             "CSV (timestamp, original_rpm, ...) — see "
+                             "AggregatedTraceReplay.")
     parser.add_argument("--num-samples", type=int, default=50,
                         help="Number of samples for sequential mode "
                              "(--arrival-mode=sequential).")
@@ -372,6 +396,24 @@ def main() -> int:
     parser.add_argument("--trace-max-output-tokens", type=int, default=None,
                         help="Skip trace rows with output > this (avoid "
                              "marathon decodes blowing trace window)")
+    # Aggregated trace replay (--arrival-mode=aggregated_trace). CSV has
+    # 1-minute rows: timestamp, original_rpm, original_prompt_token,
+    # original_completion_token.
+    parser.add_argument("--trace-subsample-step", type=int, default=1,
+                        help="Take every Nth row of the trace CSV. 10 = 10% "
+                             "sampling for faster stratified replay.")
+    parser.add_argument("--trace-compress-timeline", action="store_true",
+                        help="After subsampling, reassign sequential bucket "
+                             "times (60s apart) to remove original trace gaps.")
+    parser.add_argument("--rpm-scale", type=float, default=1.0,
+                        help="Global RPM scale factor for aggregated trace "
+                             "replay (--arrival-mode=aggregated_trace). "
+                             "0.02 = 2% of original RPM.")
+    parser.add_argument("--max-model-len", type=int, default=8192,
+                        help="Server-side max_model_len, used by aggregated "
+                             "trace replay to clamp per-request prompt+output "
+                             "tokens with 512-token safety margin. "
+                             "Default 8192 matches vllm serve default.")
     args = parser.parse_args()
 
     # profile 给默认；个别 flag 显式传值时单点覆盖
@@ -447,6 +489,22 @@ def main() -> int:
             max_rows=args.trace_max_rows,
             max_prompt_tokens=args.trace_max_prompt_tokens,
             max_output_tokens=args.trace_max_output_tokens,
+        )
+    elif args.arrival_mode == "aggregated_trace":
+        if not args.trace_file:
+            raise SystemExit(
+                "--arrival-mode=aggregated_trace requires --trace-file PATH "
+                "(pointing to the 1-min aggregated CSV)")
+        workload = AggregatedTraceReplay(
+            trace_csv=args.trace_file,
+            duration_s=args.duration,
+            rpm_scale=args.rpm_scale,
+            start_offset_s=args.trace_start_offset,
+            seed=args.seed,
+            time_scale=args.trace_time_scale,
+            max_model_len=args.max_model_len,
+            subsample_step=args.trace_subsample_step,
+            compress_timeline=args.trace_compress_timeline,
         )
     elif args.arrival_mode == "burst":
         # Burst mode: --qps is treated as ignored (avg derived from high/low/frac).

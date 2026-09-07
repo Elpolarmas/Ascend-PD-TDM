@@ -1,0 +1,21 @@
+{
+  "retrieved": "2026-09-07",
+  "paper_kit": "https://cmsworkshops.com/ICASSP2027/papers/paper_kit.php",
+  "files": [
+    {
+      "file": "spconf.sty",
+      "url": "https://cmsworkshops.com/ICASSP2027/papers/PaperFormat/spconf.sty",
+      "sha256": "dc5d632639040cb183f2ab62780f314845aa021be73048c8a9ec9c2072d64a86"
+    },
+    {
+      "file": "IEEEbib.bst",
+      "url": "https://cmsworkshops.com/ICASSP2027/papers/PaperFormat/IEEEbib.bst",
+      "sha256": "7e6ca0c8b72158d504a12bb091f817c07032a021ba41ca783cca4c2dd80d570b"
+    },
+    {
+      "file": "template/official/Template.tex",
+      "url": "https://cmsworkshops.com/ICASSP2027/papers/PaperFormat/Template.tex",
+      "sha256": "6e5ae1fb2b90d5f8a325547ca049085024eef9aa509e8b811d29b4d0a8d30283"
+    }
+  ]
+}

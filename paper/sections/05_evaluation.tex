@@ -1,0 +1,84 @@
+\section{Evaluation}
+\label{sec:evaluation}
+
+\textbf{Setup.}
+We use Qwen3-8B in BF16 on two Ascend 910B3 NPUs (64\,GB each) with TP=2,
+CANN 8.3.rc1, PyTorch/torch-npu 2.7.1, and vLLM-Ascend v0.11.0rc1. The direct
+baseline, \baseline{}, and PD-TDM use the same replica and 2,048-token prefill
+bound. T6 replays Azure-derived conversation and code bursts with a 10-s cycle.
+Mean prompt/output lengths are 1,155/211 and 2,048/28 tokens, respectively.
+Each point runs for 90\,s with a 30\,s warm-up; we report the median of three
+arrival seeds. Strict TTFT/TPOT thresholds are 200/120\,ms for conversation and
+500/200\,ms for code. Metrics include requests whose arrivals fall in the
+measurement cohort. We use only runs collected after fixing the scheduler's
+waiting gate.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.91\textwidth]{fig_t6_strict_slo.pdf}
+  \caption{Strict joint-SLO attainment and output-token goodput on
+  Azure-derived bursts. Each point is the median of three seeds. vLLM-Ascend CP
+  and PD-TDM use the same two-NPU TP replica and 2,048-token prefill bound.}
+  \label{fig:t6-main}
+\end{figure*}
+
+\textbf{Azure bursts.}
+Fig.~\ref{fig:t6-main} shows the load sweep. At conversation scale $k=3.0$,
+PD-TDM raises attainment from 29.0\% to 63.8\% (+34.8 points) and goodput from
+1,525 to 3,396 output token/s. At code scale $k=4.9$, attainment rises from
+6.5\% to 80.4\% (+73.9 points) and goodput from 87 to 438 output token/s.
+The large relative goodput at this second point should be read with its low
+baseline attainment, not as a workload-independent speedup. Wider SLOs often
+place both systems near 100\% attainment, indicating that the main effect is a
+latency-distribution shift rather than unconditional raw-throughput growth.
+
+Scheduler telemetry supports the execution claim without establishing a kernel
+cause. In one persistently backlogged code point, PD-TDM alternates pure $P/D$
+iterations and the decode-iteration inter-arrival P50/P99 is 189/203\,ms. Mixed
+and pure iterations perform unequal work, so their durations do not establish a
+fixed mixed-kernel tax.
+
+\begin{table}[t]
+\centering
+\caption{Supporting MaaS replay results; latency in ms.}
+\label{tab:maas}
+\small
+\begin{tabular}{lrr}
+\toprule
+Metric & \baseline{} & PD-TDM \\
+\midrule
+TTFT mean / P99 & 952 / 1,316 & 808 / 1,180 \\
+TPOT mean / P99 & 236 / 257 & 222 / 252 \\
+$3\times$ SLO attainment & 99.997\% & 99.997\% \\
+$1.2\times$ attainment$^{*}$ & 63.4\% & 92.6\% \\
+$1.2\times$ goodput$^{*}$ & 99.9 & 150.5 \\
+\bottomrule
+\multicolumn{3}{l}{\footnotesize $^{*}$Post-hoc; goodput in output token/s.}
+\end{tabular}
+\end{table}
+
+\textbf{MaaS replay and boundary.}
+We reconstruct request lengths from minute-level aggregates and replay a
+76-minute arrival trace containing 35,441 submitted requests per system, with
+no client errors. The configured cohort window is $[30,34200)$\,s; it contains
+35,345 arrivals, of which 21 baseline and 3 PD-TDM records lack matched latency
+telemetry. Table~\ref{tab:maas} reports matched-record latency summaries.
+PD-TDM lowers mean/P99 TTFT by 15.1\%/10.4\%. Under the original loose
+$3\times$ ideal SLO, both systems are at the ceiling. Tightening the same traces
+to $1.2\times$ ideal produces the listed separation, but this is a post-hoc
+sensitivity analysis rather than a prespecified service target.
+
+Synthetic workloads expose the other side of the tradeoff. Balanced loads show
+TTFT gains, whereas longer-output, decode-heavy cells become neutral and then
+favor the mixed baseline at high load. These boundary runs are single seed and
+some high-load cells have client timeouts, so we treat them as directional
+counterexamples rather than stable capacity estimates.
+
+\textbf{Limitations.}
+The evidence is limited to Qwen3-8B, one two-NPU platform, one software version,
+and a fixed 2,048-token bound. We have not completed best-tuned baseline chunk
+sensitivity, controlled same-backend mixed/pure isolation, static-ratio
+sensitivity, or cross-model validation. The MaaS input is reconstructed from
+aggregates and its tighter SLO is post hoc. The results therefore support an
+end-to-end comparison of these evaluated deployments, but do not isolate a
+kernel-level cause or establish a universally optimal phase share.

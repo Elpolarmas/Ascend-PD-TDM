@@ -1,6 +1,8 @@
 # 论文叙事(thesis 修正后版本)
 
 > 重写自原 `idea_proposal.md` (489 行)。thesis claim 已按 D-002 / D-003 / D-006 / D-008 调整。详细对照矩阵 + 早期 profile 数据见 `FINDINGS.md`。
+>
+> **D-016 覆盖提示(2026-08-06):** 本文中的旧 Motivation、`C3=Sarathi`、dedicated/FIA 性能归因和动态控制贡献均不得直接用于当前稿。当前论文核心、条件化表述和补实验计划以 `../PAPER_CORE_A_PLAN.md` 为准；摘要、Motivation、Contribution 和 Conclusion 在核心 A 验证前不定稿。
 
 ---
 

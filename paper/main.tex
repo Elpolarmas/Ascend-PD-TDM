@@ -1,0 +1,29 @@
+% ICASSP 2027 official layout; see template/official/SOURCES.json.
+\documentclass[10pt,letterpaper]{article}
+\usepackage{spconf}
+
+\input{preamble}
+\input{macros}
+
+% spconf's uppercase conversion does not expand title macros first.
+\expandafter\title\expandafter{\papertitle}
+\input{authors}
+
+\begin{document}
+\maketitle
+
+\input{sections/00_abstract}
+\begin{keywords}
+Large language model serving, prefill--decode scheduling, temporal multiplexing,
+service-level objectives, Ascend NPU
+\end{keywords}
+\input{sections/01_introduction}
+\input{sections/02_background}
+\input{sections/03_motivation}
+\input{sections/04_design}
+\input{sections/05_evaluation}
+\input{sections/06_conclusion}
+
+\bibliographystyle{IEEEbib}
+\bibliography{references}
+\end{document}

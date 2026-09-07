@@ -1,0 +1,23 @@
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage[numbers,square,sort&compress]{natbib}
+\usepackage{siunitx}
+\usepackage{enumitem}
+\usepackage{balance}
+\usepackage[hidelinks]{hyperref}
+\usepackage[capitalise,noabbrev]{cleveref}
+% Keep spconf's numbered, centered REFERENCES heading with natbib.
+\renewcommand{\bibsection}{\section{References}}
+
+\graphicspath{{figures/}{../figures/}}
+
+\setlist{nosep,leftmargin=*}
+\sisetup{detect-all}
+
+\newcommand{\paperTODO}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\claim}[1]{\textit{#1}}

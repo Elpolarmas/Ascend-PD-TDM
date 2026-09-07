@@ -1,13 +1,22 @@
 # 项目核心
 
+> **D-020 当前执行状态（2026-09-07）：** 从9/7开始，9/9 22:00完成完整英文R0。
+> 以 `paper/TASKS.md` 为唯一队列，审查见 `paper/READINESS_AUDIT_2026-09-07.md`。
+> 下文旧日期、T0暂停及旧baseline命名只作历史参考；VLM不阻塞初稿。
+
+
 > 这个文档说的是不轻易变的事情。任何 thesis 级修改要走 `DECISIONS.md` 记录。
-> **当前 thesis 版本: D-013(2026-05-25)** — 在 D-011 + D-012 框架内,Phase 1 数据后 framing 修正:**"phase-pure batching 让 cycle 时间短于 c3 mixed iter,mean/tail 同步改善"**(不是原 "trade tail for mean")。历次 thesis 修订见 `DECISIONS.md`。
+> **D-017 覆盖提示(2026-08-13):** 当前唯一目标是 ICASSP 2027 四页投稿；直接 baseline
+> 为 vLLM-Ascend Chunked Prefill，Sarathi-Serve 只作相关工作。论文只主张 bounded
+> pure-phase 设计事实、Ascend 同平台端到端结果和适用边界，不主张固定 mixed tax、
+> kernel 根因或在线最优 ratio。唯一执行入口为 `paper/TASKS.md`；本文件以下旧 thesis
+> 内容仅保留历史上下文。
 
 ---
 
 ## 1. 项目一句话
 
-在 single-node multi-NPU 上(2 张 Ascend 910B3,TP=2),基于 vllm-ascend v0.11.0rc1 实现 PD-TDM(Prefill-Decode Temporal Multiplexing)调度 paradigm,提供 goodput-centric improvement under SLO constraints。论文目标 CCF-B/C。
+在 single-node multi-NPU 上(2 张 Ascend 910B3,TP=2),基于 vllm-ascend v0.11.0rc1 实现 PD-TDM(Prefill-Decode Temporal Multiplexing)调度 paradigm,提供 goodput-centric improvement under SLO constraints。当前论文目标为 ICASSP 2027 regular paper。
 
 ---
 

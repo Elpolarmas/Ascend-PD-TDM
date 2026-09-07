@@ -1,0 +1,14 @@
+\begin{abstract}
+Chunked prefill bounds the prefill work admitted into an iteration, but the
+service share between prefill and decode remains implicit in mixed batches.
+This is restrictive when one tensor-parallel replica must serve both phases
+and neither another replica nor intra-device partitioning is available. We
+present PD-TDM, which retains bounded prefill and local KV state while
+scheduling prefill-only and decode-only iterations with an explicit phase
+share. On Qwen3-8B using two Ascend 910B3 NPUs, PD-TDM improves strict
+joint-SLO attainment over same-platform vLLM-Ascend chunked prefill by 34.8
+percentage points on a conversation burst and 73.9 points on a code burst at
+representative high loads. A reconstructed MaaS trace shows lower mean/P99
+time to first token. Decode-heavy tests expose the boundary: benefits diminish
+or reverse when decode has little latency slack.
+\end{abstract}

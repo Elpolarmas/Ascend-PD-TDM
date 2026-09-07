@@ -1,0 +1,21 @@
+\section{Problem and Metric}
+\label{sec:motivation}
+
+Let an iteration have token budget $B$, prefill bound $C$, and $D_t$ active
+decode tokens. A decode-first mixed scheduler can admit prefill work
+$P_t\leq\min(C,B-D_t)$. Thus $C$ bounds a chunk, but the current decode batch
+implicitly determines the prefill service left in that iteration. PD-TDM
+separates the controls: a prefill iteration admits at most
+$P_t\leq\min(C,B)$ prompt tokens, while a phase share determines how frequently
+prefill is selected when both queues contain work.
+
+We evaluate this exchange with request-level joint-SLO attainment and goodput.
+For requests arriving in measurement window $T$, output length $o_i$, and
+thresholds $S_T,S_P$, we use
+\begin{equation}
+G=\frac{1}{T}\sum_i o_i\,
+\mathbf{1}[\mathrm{TTFT}_i<S_T\land\mathrm{TPOT}_i<S_P].
+\end{equation}
+Here TPOT is the per-request mean inter-token time, not a bound on every token
+interval. Goodput can differ at similar raw throughput when latency
+distributions fall on different sides of the joint threshold.

@@ -1,0 +1,39 @@
+\section{Introduction}
+\label{sec:introduction}
+
+Online large-language-model (LLM) serving must control both time to first token
+(TTFT) and time per output token (TPOT). Prefill processes the prompt and is
+typically compute intensive; decode repeatedly reads a growing KV cache and is
+often memory intensive. A scheduler therefore needs to advance queued prompts
+without creating long gaps for active generations.
+
+Continuous batching rebuilds the batch at every iteration~\cite{yu2022orca,
+kwon2023vllm}. Chunked prefill further limits prompt work and mixes a bounded
+prefill chunk with decode tokens, reducing generation stalls~\cite{
+agrawal2024sarathi,holmes2024fastgen}. This bound controls how much prefill work
+enters one iteration, but does not independently specify how often prefill is
+served: under a decode-first token budget, available prefill capacity depends
+on the current decode batch.
+
+Physical prefill--decode disaggregation can provision the phases independently,
+but requires distinct instances and KV transfer~\cite{patel2024splitwise,
+zhong2024distserve}. Spatial multiplexing instead depends on concurrent kernels
+and controllable compute partitioning. We study the complementary deployment
+budget in which one tensor-parallel (TP) replica occupies the allocated devices
+and both phases retain its weights and KV cache locally.
+
+We present \system{}, a scheduler that separates state sharing from execution.
+It preserves chunked continuation, but each model iteration is prefill-only or
+decode-only. A selector exposes the long-run prefill service tendency as a
+configurable share, and work-conserving fallback serves the nonempty phase.
+This creates an explicit interface between TTFT and TPOT pressure. The benefit
+is conditional: prefill-only slots can reduce queueing when decode has TPOT
+slack, whereas they can harm a saturated decode queue.
+
+Our contributions are: (1) identifying the chunk bound and cross-iteration
+phase share as distinct controls; (2) implementing bounded, phase-pure
+scheduling in a shared TP replica without weight duplication or KV transfer;
+and (3) evaluating both its gains and boundary on two Ascend 910B3 NPUs.
+Three-seed Azure-derived bursts show strict joint-SLO improvements, a large
+reconstructed MaaS workload supports the TTFT trend, and decode-heavy cases
+show that PD-TDM is not a universal replacement for mixed chunked prefill.

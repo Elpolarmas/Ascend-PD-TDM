@@ -6,6 +6,174 @@
 
 ---
 
+## D-022(2026-09-07)清理 paper 为单一 ICASSP 投稿工作区
+
+**状态:active**
+
+- `paper/` 只保留当前英文四页稿、官方 spconf/IEEEbib 与官方示例、当前计划/证据文档、
+  引用文献、正文实际使用的 T6 PDF 图和最小 paper-facing 数据。
+- 旧任务表、中文模板兼容文件、VLM 条件性方案、未引用候选图和空表目录移至
+  `memory/archive/paper_cleanup_2026-09-07/`，不删除。
+- 新增 `experiments/plot_icassp_main_figure.py`，只生成当前正文引用的主图，防止重绘时
+  将候选图重新写回 paper。
+- 构建目录当前只保留 `main.pdf`；LaTeX 辅助文件可由 `latexmk` 重建。
+
+---
+
+## D-021(2026-09-07)接入ICASSP2027官方LaTeX模板与截止时间核验
+
+**状态:active**
+
+- **触发:** 用户要求核查单独abstract截止并直接接入官方模板。
+- **实现:** main改为article+官方spconf；IEEEbib数字引用；新增authors与过渡中文字体文件。
+  保留原sections及原始数据；旧入口文件归档；官方文件URL/hash记录在SOURCES.json。
+- **验收:** XeLaTeX/latexmk编译通过，9页US Letter PDF，字体嵌入、引用解析；已检查首页。
+  仍为中文长稿、作者占位和旧图表，不能标记英文四页R0完成。
+- **日期:** 官方regular投稿说明未列独立摘要截止；全文截止明确为北京时间9/17 20:00。
+  内部9/9初稿、9/15计划提交不变。依据paper/README.md所列官方页面。
+
+---
+
+## D-020(2026-09-07)以9/9完整初稿重排计划，先关闭论文证据与表达缺口
+
+**状态:active**
+
+- **触发:** 用户要求从今天开始，以9/9完整合格初稿为目标，先重设计划再审查补充内容。
+- **取代:** TASKS D-019旧日期及D-018的T0暂停/V0前置规则；保留D-017同平台与三claim范围。
+- **安排:** 9/7故事、数字审计与模板；9/8晚完整英文稿；9/9审查并于22:00冻结R0。
+- **优先级:** 配置公平、数字回源、统计口径、最近邻差异和四页完整性为必做；VLM与新增
+  实验只有能关闭具体claim风险且不阻塞成稿才准入。不得用未审计数字换取按时完成。
+- **发现:** 中文稿14页；manifest/机制主图未落地；MaaS到达窗口与统计分母不同、unmatched
+  请求与attainment分母需要说明；不能把request attainment直接乘raw token throughput。
+- **产物:** paper/TASKS.md、READINESS_AUDIT_2026-09-07.md；旧任务表已归档。
+- **范围:** 本轮完成计划与审查；不声称已完成英文论文或完整数据复算。9/10供导师评审，
+  9/14内部定稿、9/15计划提交；消息发送和投稿由用户安排。
+
+---
+
+## D-018(2026-08-19)新增 ICASSP venue-fit / 多模态模型决策门，T0 暂停
+
+**状态:部分被 D-020 取代；V0 不再阻塞 T0，模态候选分析保留。**
+
+- **触发:**
+  - 在冻结 T0 故事前，需要确认 ICASSP 作为信号处理旗舰会议是否要求增加音频、视频或
+    图像模型实验，以增强论文与目标社区的相关性。
+  - ICASSP 2027 官方 scope 同时包含 Applied Signal Processing Systems、Machine Learning
+    and Generative AI、Speech and Language Processing、Image/Video/Multidimensional SP；
+    因此文本 LLM serving 并非天然越界，但“通用系统工作与 SP 社区的关联”仍是评审风险。
+  - 本地版本审计显示 Qwen2.5-VL-7B 有 vLLM-Ascend 在线 serving benchmark，且 PD-TDM
+    scheduler 保留 encoder-input scheduling；Qwen2-Audio 在该版本只能方便地做离线推理，
+    OpenAI-compatible server 不支持 audio input，Whisper 未支持。
+
+- **新决策:**
+  1. 暂停 T0，先执行 V0 venue-fit 决策门；多模态实验是条件性增强项，不因会议名称直接
+     设为必做。
+  2. 候选模型优先选择 **Qwen2.5-VL-7B-Instruct**，因为它与当前 7B/8B 自回归 decoder
+     规模接近、同一 vLLM-Ascend 版本有在线 benchmark 路径，并能真实引入图像信号输入。
+  3. 不选择纯图像生成/图形学模型：PD-TDM 的 Prefill/Decode 调度对象和 TTFT/TPOT 指标
+     不可直接迁移，会产生一篇新的论文主线。
+  4. 不选择 Qwen2-Audio/Whisper 作为当前首选：在线 serving harness 或平台支持不满足
+     最小改动原则。若后续已有可用在线音频服务路径，可重新评估。
+  5. VL 实验只有同时满足以下条件才进入 ICASSP 正文：无需修改 PD-TDM 核心机制；CP 与
+     PD-TDM 语义公平；encoder 开销可记录并解释；结果对 claim 提供新信息；最终只占一行
+     结果或一个小子图。否则不做/不报，以 ML & Generative AI / Applied SP Systems framing
+     建立 venue relevance。
+
+- **V0 输出:**
+  - venue/track 定位；是否需要模态实验；候选模型与数据集；最小实验矩阵；Go/No-Go 标准；
+    对四页故事和 claim 的影响。
+
+---
+
+## D-017(2026-08-13)目标切换为 ICASSP 2027 四页投稿，先冻结故事再按风险补实验
+
+**状态:active(2026-08-13)**
+
+- **触发:**
+  - 导师建议赶 ICASSP 2027；正式论文截稿为 2026-09-16，技术内容限 4 页。
+  - 现有 D-016 计划以“完整系统因果闭环”为完成门槛，任务范围偏向长篇系统论文，
+    不适合 ICASSP 四页稿的时间与篇幅约束。
+  - 项目实验均运行于 vLLM-Ascend / Ascend 910B3，无法也没有必要跨平台复现 GPU
+    Sarathi-Serve；导师确认直接比较同平台的 vLLM-Ascend Chunked Prefill 即可。
+
+- **新决策:**
+  1. 当前唯一投稿目标为 **ICASSP 2027 regular paper**；内部完成日为 2026-09-14，
+     2026-09-15 提交，官方截止日仅作缓冲。
+  2. 直接 baseline 固定命名为 **vLLM-Ascend Chunked Prefill (vLLM-Ascend CP)**。
+     Sarathi-Serve 只作为 Chunked Prefill 的思想来源和相关工作，不作跨 GPU/NPU 性能比较，
+     不写“PD-TDM 优于 Sarathi-Serve”。
+  3. 主线固定为：Chunked Prefill 控制单次 Prefill 工作上限，但 P/D 跨 iteration 的服务
+     份额仍隐式依赖 mixed batch；PD-TDM 用 bounded pure-phase iteration 将 chunk bound
+     与阶段服务机会解耦，在 Prefill 压力高且 Decode 有 TPOT 余量时改善联合 SLO，
+     deep-decode/TPOT-tight 区域作为负对照。
+  4. 当前论文只保留三类 claim：设计事实、Ascend 同平台端到端结果、适用边界。
+     不把 PID、动态最优 ratio、固定 mixed-batch tax、kernel 根因或跨平台普适性列为贡献。
+  5. 先用现有数据完成四页初稿，再做 reviewer-risk audit；只有会破坏主 claim 的缺口才
+     进入补实验关键路径。完整 Sarathi 移植、动态控制器、全矩阵重跑和跨 GPU 对比停止。
+  6. T6 三 seed Azure burst 为主证据；MaaS 为外部有效性支持；F5/F5b/F5d 只承担边界与
+     负对照，其中 single-seed/timeout 限制必须显式披露。
+
+- **执行入口:**
+  - `paper/TASKS.md`：唯一权威任务队列，按任务逐项推进。
+  - `paper/WRITING_PLAN.md`：ICASSP 四页结构和篇幅预算。
+  - `paper/CLAIMS.md`：下一任务中按本决策冻结并统一 baseline 命名。
+
+- **对 D-016 的影响:**
+  - D-016 的代码路径、Attention dispatch 和旧 FIA 消融审计仍有效。
+  - D-016 将 Force-FIA、等工作量微基准和 best-tuned CP 全部设为投稿前硬门槛的安排被
+    本决策取代；这些实验改为初稿完成后的条件性风险项。
+
+---
+
+## D-016(2026-08-06)论文核心收敛为 bounded phase-pure，旧 mixed-tax/FIA 归因重新开放
+
+**状态:superseded by D-017 for submission planning; technical audit remains valid**
+
+- **触发:**
+  - 将 PD-TDM 转换为论文时，重新审计 vLLM v0.11.0 / vllm-ascend
+    v0.11.0rc1、`c3_cp`、`TDMScheduler`、ModelRunner 和 Attention dispatch。
+  - 发现旧 narrative 同时把 `c3_cp` 直接称作 Sarathi-Serve、把 C3 简化成“始终
+    FIA”，并用可能未传播到 TP worker 的 Scheduler-time monkey patch 得出“kernel
+    贡献约等于零”。这些结论不能继续作为核心 A 的已验证证据。
+
+- **新决策:**
+  1. 当前论文核心固定为 **A：保留 Prefill chunk cap 的 bounded phase-pure
+     scheduling，与 Sarathi-style mixed Chunked Prefill 的比较**。
+  2. 动态 PD ratio 是后续优化方向，不承担当前论文第一贡献；ratio 在当前论文中准确
+     描述为 P iteration 的长期频率/信用，chunk cap 控制单次 P 工作量。
+  3. `c3_cp` 正式命名为 **vLLM V1 Chunked Prefill (Sarathi-style)**，不再直接称为
+     Sarathi-Serve。vLLM V1 已实现 Sarathi 核心在线调度思想，但不是完整研究系统原样
+     合入。
+  4. 当前 CP 与 TDM 均使用 native state dispatch：CP 的 mixed/partial Prefill 进入
+     FIA，pure initial Prefill / Decode-only 走专用路径；TDM 的 pure P/D 主要走专用
+     路径。“C3 始终 FIA”作废。
+  5. 旧 `m31_fia` 消融降为 **未验证**。必须把 Force-FIA 放到模型 worker 初始化路径，
+     并用 rank 日志、调用计数或 NPU profiler 证明实际执行后方可引用。
+  6. 核心 A 的必做验证为：运行时 P/D + Attention-state telemetry、CP token-budget
+     tuning、worker 级 TDM-ForceFIA、同 FIA 等工作量 Mixed-vs-Pure 微基准，以及
+     代表性双 SLO 端到端验证。
+  7. 在验证完成前，摘要、Motivation、Contribution 和 Conclusion 不定稿；稳定章节和
+     实验方案继续整理。
+
+- **核心假设:**
+  - H1：统一 backend 和等工作量后，目标 workload/SLO 区域存在
+    `T_P(P)+T_D(D)+T_switch < T_mix(P,D)`。
+  - H2：Prefill 压力高、TTFT 紧且 Decode 有 TPOT 余量时，PD-TDM 优势增大。
+  - H3：Decode-heavy、TPOT 极紧、低负载或 mixed cost 很小时，优势缩小或消失。
+
+- **影响文档:**
+  - 新增 `PAPER_CORE_A_PLAN.md` 作为论文/实验当前主入口。
+  - `README.md`、`PROJECT.md`、`design/paper.md` 增加 D-016 覆盖提示。
+  - 后续实验完成后再更新 `EXPERIMENTS.md`、`FINDINGS.md` 和论文正文。
+
+- **Supersedes / reopens:**
+  - 覆盖 D-014 中把 `c3_cp` 直接命名为 Sarathi chunked prefill/open-source impl 的表述。
+  - 重新开放 D-009“kernel 贡献约等于零”的结论；旧消融在确认 TP worker 生效前无效。
+  - 重新开放 D-015/F0+“mixed-batch tax 已由现有 cycle telemetry 因果证实”的结论；
+    现有数据只证明 bundle-level 时间差，需同 FIA、等工作量实验归因。
+
+---
+
 ## D-015(2026-05-26)导师汇报 3 challenges + first-principles 辩护 + F0+ 升 P0 / F5 降 P1
 
 **状态:active(2026-05-26)**

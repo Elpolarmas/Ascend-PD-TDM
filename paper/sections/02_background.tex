@@ -1,0 +1,32 @@
+\section{Background and Related Work}
+\label{sec:background}
+
+\textbf{Aggregated serving.}
+Orca introduced iteration-level scheduling, and vLLM's PagedAttention enables
+memory-efficient continuous batching~\cite{yu2022orca,kwon2023vllm}. Long
+prefills can nevertheless delay generation. Sarathi-Serve bounds prefill chunks
+and constructs decode-maximal mixed batches; Dynamic SplitFuse similarly splits
+and combines prompt and generation work~\cite{agrawal2024sarathi,
+holmes2024fastgen}. PD-TDM retains this prior bounded-prefill contribution. Its
+additional control is the opportunity assigned to each phase across iterations.
+Our measured baseline is the native chunked-prefill path in vLLM-Ascend on the
+same NPUs, denoted \baseline{}; we do not claim a cross-platform comparison to
+the Sarathi-Serve system.
+
+\textbf{Disaggregation and spatial multiplexing.}
+Splitwise and DistServe place prefill and decode on different instances, while
+Mooncake builds a KV-cache-centric distributed architecture~\cite{
+patel2024splitwise,zhong2024distserve,qin2025mooncake}. These designs gain
+independent phase capacity at the cost of additional replicas and state
+movement. MuxWise and semi-PD share storage while concurrently partitioning GPU
+compute between the phases~\cite{chen2026muxwise,hong2025semipd}. Their spatial
+isolation is orthogonal to PD-TDM, which gives the entire TP replica to one
+phase at a time.
+
+\textbf{Temporal orchestration.}
+EcoServe is the closest prior design: it temporally disaggregates phases within
+an instance and rolls activation across multiple cooperating instances to keep
+prefill available~\cite{du2026ecoserve}. PD-TDM does not claim to originate
+temporal disaggregation. It instead studies bounded, iteration-granular phase
+scheduling when the deployment has only one shared TP replica, and explicitly
+reports the decode-pressure region in which this choice fails.

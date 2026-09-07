@@ -1,12 +1,29 @@
 # PD-TDM 项目记忆
 
+> **D-020 当前执行状态（2026-09-07）：** 从9/7开始，9/9 22:00完成完整英文R0。
+> 以 `paper/TASKS.md` 为唯一队列，审查见 `paper/READINESS_AUDIT_2026-09-07.md`。
+> 下文旧日期、T0暂停及旧baseline命名只作历史参考；VLM不阻塞初稿。
+
+
 > 新 session 从这里开始读。其它文档按需读。
 
 ## 项目一句话
 
-在 single-node multi-NPU(2 张 Ascend 910B3,TP=2,锁 vllm-ascend v0.11.0rc1)上实现 PD-TDM(P/D Temporal Multiplexing)调度 paradigm,提供 goodput-centric improvement under SLO constraints。目标 CCF-B/C 论文。
+在 single-node multi-NPU(2 张 Ascend 910B3,TP=2,锁 vllm-ascend v0.11.0rc1)上实现 PD-TDM(P/D Temporal Multiplexing)调度 paradigm,提供 goodput-centric improvement under SLO constraints。当前目标为 ICASSP 2027 四页论文。
 
-**当前 thesis 版本:D-014(2026-05-26 baseline 重定位)+ D-015(2026-05-26 导师 challenges 应对 + F0+/F5 实证)**。在 D-013 数据基础上,paper baseline 命名重定位为 Vanilla CB / Sarathi / PD-TDM / c4_pd,NPU 首次复现 Sarathi finding + 短 prompt 反例 fresh finding。D-015 应对导师 3 challenges:trace token 分布实测确认 conv/code 都 prefill-leaning;first-principles 三柱辩护(chunk_budget 继承 + NPU variable-query 税 + selector 节奏);**F0+ Option A 实证柱 2:NPU mixed batch tax ~15%(34ms / 220ms)**;**F5 实证 workload → 优势单调谱:DH(1:16)goodput Δ=0(但 TTFT 仍砍半)、balanced(1:1)PD-TDM +45% gp / +29pp meet @ QPS=1.0 strict、conv(5:1)+10~30pp、code(73:1)+70~80pp**。**核心 mechanism finding**:三 paradigm 总吞吐完全相等,goodput Δ 100% 来自 latency 分布(PD-TDM 在所有 workload 上把 TTFT mean 砍半)。
+**当前 thesis 版本:D-017(2026-08-13)**。直接 baseline 固定为
+**vLLM-Ascend Chunked Prefill**；Sarathi-Serve 只作为技术来源和相关工作，不作跨平台性能
+比较。论文主线为 bounded Prefill 与 pure-phase stage share 的解耦，主张限于 Ascend 同
+平台结果和 workload/SLO 边界。先完成四页初稿，再按 reviewer risk 决定最小补实验。
+唯一执行入口见 `paper/TASKS.md`，页面结构见 `paper/WRITING_PLAN.md`。
+
+## D-016 技术审计状态(历史，仍可引用)
+
+- **已有:**完整 PD-TDM 系统、vLLM-CP/传统 coupling/PD-disagg 端到端数据、MaaS/Azure/synthetic workload、双 SLO Goodput 与适用区域现象。
+- **未闭合:**调度收益与旧版 Attention path 收益的拆分；固定 CP=2048 的 baseline tuning 公平性；旧 Force-FIA 是否进入 TP worker。
+- **必做:**P/D+Attention-state telemetry、CP budget `{512,1024,2048,4096}` 短时搜参、worker 级 `TDM-ForceFIA`、等工作量 `Mixed-FIA vs Pure-FIA`、代表性三 seed 端到端验证。
+- **写作策略:**继续背景/设计/实现/实验方法/已有事实整理；摘要、Motivation、贡献列表和 Conclusion 暂不定稿。
+- **版本路径与新版 Smoke:**见 `CP_TDM_VERSION_AND_FIA_SMOKE.md`，汇总 v0.11/v0.13 路径、vLLM CP 与 Sarathi-Serve 的边界，以及默认 FIA 下的最小移植验证。
 
 ## 当前状态(2026-05-26 / D-014 baseline 重定位)
 
@@ -175,6 +192,7 @@ Framing 净变化:
 | `results/` 目录用途 / 实验代次时间线 | `EXPERIMENTS.md` |
 | Finding 链 / 设计与实测的差距 / 已废弃路径 | `FINDINGS.md` |
 | Thesis 调整历史 | `DECISIONS.md` |
+| 当前论文核心 A、写作与补实验路线图 | `PAPER_CORE_A_PLAN.md` |
 | 慢回路 PID 细节(internal,paper 不写)| `design/slo_pid.md` |
 | 采样模块(降级为 evaluation methodology)| `design/sampling.md` |
 | Chunking 机制 | `design/chunking.md` |
@@ -192,10 +210,10 @@ Framing 净变化:
 
 **给新 session 的关键 hand-off:**
 
-1. 读 `T6_FINDINGS.md` 看 Phase 1 完整数据 + 机制 verify
-2. 读 `DECISIONS.md` D-013 看 thesis framing 修正 + caveat
-3. 跟进事项见上文「跟进事项」section
-4. **不要回退 D-013 的几个核心结论**:
+1. **先读 `paper/TASKS.md` 与 `DECISIONS.md` D-017**，它们定义 ICASSP 当前任务和 claim 边界。
+2. 再读 `paper/WRITING_PLAN.md`、`paper/CLAIMS.md` 和 `T6_FINDINGS.md`；其中旧 baseline 名称需按 D-017 解释。
+3. D-016 的代码/Attention 审计见 `PAPER_CORE_A_PLAN.md`，只在后续风险项需要时引用。
+4. **仍不要回退 D-013 的数据质量原则**:
    - thesis framing = "phase-pure cycle 短于 c3 mixed iter"(不是 trade tail for mean)
    - PID 不是优势来源
    - c3 vs c1 不普适胜出(conv strict SLO 反例)

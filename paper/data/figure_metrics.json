@@ -1,0 +1,83 @@
+{
+  "t6": {
+    "conv": {
+      "k": 3.0,
+      "pd_attainment": 0.638,
+      "sarathi_attainment": 0.29,
+      "pd_goodput_tok_s": 3395.85,
+      "sarathi_goodput_tok_s": 1525.43
+    },
+    "code": {
+      "k": 4.9,
+      "pd_attainment": 0.804,
+      "sarathi_attainment": 0.065,
+      "pd_goodput_tok_s": 438.03,
+      "sarathi_goodput_tok_s": 87.1
+    }
+  },
+  "f5": {
+    "P256_O256": {
+      "mean_attainment_delta_pp": 0.0,
+      "single_seed": true,
+      "client_errors_observed": false
+    },
+    "P256_O1024": {
+      "mean_attainment_delta_pp": 0.0,
+      "single_seed": true,
+      "client_errors_observed": false
+    },
+    "P256_O4096": {
+      "mean_attainment_delta_pp": 0.0,
+      "single_seed": true,
+      "client_errors_observed": true
+    },
+    "P1024_O256": {
+      "mean_attainment_delta_pp": 0.0,
+      "single_seed": true,
+      "client_errors_observed": false
+    },
+    "P1024_O4096": {
+      "mean_attainment_delta_pp": 0.0,
+      "single_seed": true,
+      "client_errors_observed": true
+    },
+    "P4096_O256": {
+      "mean_attainment_delta_pp": 8.269023178499294,
+      "single_seed": true,
+      "client_errors_observed": true
+    },
+    "P4096_O1024": {
+      "mean_attainment_delta_pp": 4.80939716312057,
+      "single_seed": true,
+      "client_errors_observed": true
+    },
+    "P4096_O4096": {
+      "mean_attainment_delta_pp": 6.067226890756302,
+      "single_seed": true,
+      "client_errors_observed": true
+    },
+    "P1024_O1024": {
+      "mean_attainment_delta_pp": 0.0,
+      "single_seed": true,
+      "client_errors_observed": false
+    }
+  },
+  "maas": {
+    "sarathi": {
+      "n_valid_requests": 35324,
+      "window_s": 34170.0,
+      "x1.2_attainment": 0.634384554410599,
+      "x1.2_goodput_output_tok_s": 99.92104184957564,
+      "x3.0_attainment": 0.9999716906352621,
+      "x3.0_goodput_output_tok_s": 164.16921275973075
+    },
+    "pdtdm": {
+      "n_valid_requests": 35342,
+      "window_s": 34170.0,
+      "x1.2_attainment": 0.9260370097900515,
+      "x1.2_goodput_output_tok_s": 150.5091015510682,
+      "x3.0_attainment": 0.9999717050534774,
+      "x3.0_goodput_output_tok_s": 164.2599941469125
+    }
+  }
+}

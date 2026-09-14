@@ -1,30 +1,54 @@
 \section{PD-TDM Design}
 \label{sec:design}
 
-PD-TDM runs inside one model instance on the same TP devices. Weights and KV
-blocks remain local. Before every model iteration, the scheduler selects phase
-$P$ or $D$. A $P$ iteration advances only unfinished prompts; a $D$ iteration
-generates one token for each selected active sequence. This phase-purity
-invariant is enforced for running partial prefills and newly admitted requests.
+\textbf{Execution invariant.}
+PD-TDM runs on a single TP replica: a coordinated accelerator group holding
+one model copy. Weights and KV blocks remain local; there is no second P/D
+replica or spatial partition. Before each model iteration,
+the scheduler selects $P$ or $D$ and only then invokes the corresponding batch
+planner. A $P$ iteration advances unfinished prompts, while a $D$ iteration
+generates one token for selected active sequences. A \phasepure{} iteration
+contains Prefill tokens or Decode tokens, but never both; request state remains
+shared across iterations. This is execution separation without state or replica
+disaggregation.
 
-\textbf{Bounded continuation.}
-The prefill planner applies an aggregate $C=2{,}048$ token limit per $P$
-iteration. It first continues partial prefills and then admits waiting requests
-with the remaining budget. An unfinished prompt retains its KV state and
-continues later. The token bound limits admitted work; since iteration time is
-workload dependent, it is not a strict wall-clock guarantee.
+\textbf{Bounded Prefill continuation.}
+The Prefill planner applies an iteration-wide cap $C=\chunkbudget$ to newly
+advanced prompt tokens. It first resumes partially prefetched requests and then
+admits waiting requests with the residual cap and the parent scheduler's token
+budget. A request whose prompt is truncated remains active with its KV state and
+is resumed in a later $P$ iteration. The cap bounds admitted token work, not
+wall-clock duration: iteration time still depends on request count, sequence
+length, and the backend execution path.
 
-\textbf{Phase selection.}
-A token bucket accumulates a configurable target prefill share $r\in[0,1]$.
-When both phases have work, sufficient credit selects $P$ and consumes one unit;
-otherwise it selects $D$. If only one phase has work, the scheduler immediately
-serves it, so $r$ describes a contention-time tendency rather than a fixed
-sequence or wall-clock ratio. The implementation also exposes TTFT-urgency and
-decode-starvation overrides. Our claims concern the observed configured
-scheduler, not an online controller that finds an optimal $r$.
+\textbf{Two-timescale phase allocator.}
+The slow SLO-reactive loop updates the target $r_k$ from recent TTFT/TPOT
+violation pressure. In the evaluated path it starts from $0.30$, updates every
+eight iterations after warm-up, applies EMA/deadband and saturation protection,
+and clips the target to $[0.05,0.80]$. The fast selector credits a token bucket
+by the current $r_k$ on each scheduling opportunity, up to a capacity of four.
+When both Prefill and Decode have work, it selects $P$ when a full credit is
+available and otherwise selects $D$; the credit is committed against the phase
+that actually executes. If only one queue is nonempty, it serves that queue
+immediately. Thus, the slow loop chooses a P/D operating tendency while the
+fast loop realizes it at iteration granularity; neither quantity is a strict
+wall-clock share. The main M3.1 runs disable the optional TTFT-urgency and
+Decode-starvation overrides.
 
-This design predicts its boundary. When prompt queueing dominates and TPOT has
-slack, concentrated $P$ iterations can move TTFT left while $D$ iterations
-remain within the TPOT threshold. Under a deep decode queue, the silence created
-by a $P$ iteration consumes the remaining TPOT slack and mixed chunked prefill
-can be preferable.
+\textbf{Safety and starvation control.}
+Minimum and maximum phase-slice constraints prevent rapid alternation and bound
+the number of consecutive iterations assigned to one phase. The evaluated
+configuration uses two and eight iterations as the minimum and maximum slice
+limits. A KV boundary guard vetoes a planned $P$ iteration when the free-KV
+watermark is below the configured threshold, allowing Decode to release state
+before another Prefill allocation. These guards are part of the scheduler
+policy, not a second resource pool.
+
+The design has two explicit limits. First, $r_k$ does not promise a fixed
+fraction of elapsed time, since $P$ and $D$ iterations have unequal cost.
+Second, phase purity is not itself a performance claim: the comparison measures
+the complete two-timescale scheduler and execution path on the pinned platform.
+Queue fallbacks, slice limits, and the KV guard are runtime safeguards, not
+formal latency or starvation guarantees. The present study does not include a
+controller-only ablation or establish that the slow loop finds an optimal
+ratio; the reported gains are end-to-end results for the integrated policy.

@@ -21,9 +21,9 @@ import matplotlib.pyplot as plt  # noqa: E402
 
 
 SERIES = (
-    ("vanilla_cb", "Vanilla CB", "#7A7A7A", "o"),
-    ("c3_cp", "vLLM-Ascend CP", "#E68613", "s"),
-    ("c2_tdm_m31_2048_fix", "PD-TDM", "#2A6FDB", "D"),
+    ("vanilla_cb", "CP (B=8192; equal-B ref.)", "#7A7A7A", "o"),
+    ("c3_cp", "CP (B=2048)", "#B45F06", "s"),
+    ("c2_tdm_m31_2048_fix", "PD-TDM (B=8192)", "#1261A0", "D"),
 )
 WORKLOADS = (
     ("conv", "Conversation: strict joint SLO\nTTFT < 200 ms, TPOT < 120 ms"),
@@ -45,7 +45,7 @@ def main() -> None:
         "lines.markersize": 4.5,
         "pdf.fonttype": 42,
     })
-    figure, axes = plt.subplots(2, 2, figsize=(7.0, 4.75), sharex="col")
+    figure, axes = plt.subplots(2, 2, figsize=(7.0, 3.95), sharex="col")
     for column, (workload, title) in enumerate(WORKLOADS):
         for config, label, color, marker in SERIES:
             rows = sorted(data[workload]["s1"][config], key=lambda row: row["k"])
@@ -63,8 +63,9 @@ def main() -> None:
         for row in range(2):
             axes[row, column].grid(alpha=0.25, linewidth=0.6)
             axes[row, column].text(
-                -0.16, 1.03, f"({chr(97 + 2 * row + column)})",
-                transform=axes[row, column].transAxes, fontweight="bold"
+                0.01, 1.03, f"({chr(97 + 2 * row + column)})",
+                transform=axes[row, column].transAxes, fontweight="bold",
+                ha="left"
             )
     axes[0, 0].set_ylabel("Joint-SLO attainment (%)")
     axes[1, 0].set_ylabel("SLO goodput (output token/s)")

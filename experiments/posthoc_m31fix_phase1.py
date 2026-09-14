@@ -24,7 +24,7 @@ import json
 import statistics
 from pathlib import Path
 
-ROOT = Path("/vllm-workspace/Ascend-PD-TDM")
+ROOT = Path(__file__).resolve().parents[1]
 T6_DIR = ROOT / "results/phase_2_t6_burst_goodput"
 C3_FAIR_DIR = ROOT / "results/c3_chunk2048_supplement"
 M31_FIX_DIR = ROOT / "results/m31fix_validate"
@@ -51,7 +51,9 @@ SLO_GRID = {
     "code": {"s1": (500.0, 200.0), "s2": (500.0, 700.0), "s3": (2000.0, 400.0)},
 }
 
-WINDOW_DURATION_S = 60.0
+WINDOW_START_S = 30.0
+WINDOW_END_S = 90.0
+WINDOW_DURATION_S = WINDOW_END_S - WINDOW_START_S
 DECISIVE_PP = 5.0
 TIE_PP = 1.0
 
@@ -65,7 +67,12 @@ def _pct(xs, q):
 
 
 def _recompute(joined, ttft_slo, tpot_slo):
-    ok = [r for r in joined if r.get("matched") and r.get("status") == 200
+    # Match the online metric definition: select requests by arrival time in
+    # the steady-state window before filtering successful telemetry records.
+    win = [r for r in joined
+           if WINDOW_START_S <= r.get("arrival_time_s", -1) < WINDOW_END_S]
+    ok = [r for r in win
+          if r.get("matched") and r.get("status") == 200
           and r.get("ttft_ms") is not None and r.get("tpot_ms_mean") is not None]
     if not ok:
         return None
@@ -77,8 +84,12 @@ def _recompute(joined, ttft_slo, tpot_slo):
     ttfts = [r["ttft_ms"] for r in ok]
     tpots = [r["tpot_ms_mean"] for r in ok]
     return {
-        "n": len(ok),
-        "meet_frac": n_meet / len(ok),
+        # Count all arrivals in the denominator. Requests with client errors
+        # or missing telemetry are therefore conservative non-attainments.
+        "n_in_window": len(win),
+        "n_matched": len(ok),
+        "n_meet": n_meet,
+        "meet_frac": n_meet / len(win),
         "ttft_mean": round(sum(ttfts)/len(ttfts), 2),
         "ttft_p99": round(_pct(ttfts, 0.99), 2),
         "tpot_mean": round(sum(tpots)/len(tpots), 2),

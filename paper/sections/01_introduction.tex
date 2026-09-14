@@ -1,39 +1,57 @@
 \section{Introduction}
 \label{sec:introduction}
 
-Online large-language-model (LLM) serving must control both time to first token
-(TTFT) and time per output token (TPOT). Prefill processes the prompt and is
-typically compute intensive; decode repeatedly reads a growing KV cache and is
-often memory intensive. A scheduler therefore needs to advance queued prompts
-without creating long gaps for active generations.
+Online large-language-model (LLM) serving must satisfy two coupled latency
+objectives. Time to first token (TTFT) determines how quickly a request starts
+to respond, while time per output token (TPOT) determines the smoothness of an
+ongoing generation. Prefill processes a prompt and often consumes substantial
+compute and memory bandwidth; Decode repeatedly reads KV state and emits one
+or a few tokens per sequence. Allocating more service opportunities to one
+phase can therefore move the other phase across its service-level objective
+(SLO), even when aggregate output throughput changes little. We use
+\emph{single TP replica} for one coordinated tensor-parallel group holding
+one model copy; it is a scheduling unit, not one device.
 
-Continuous batching rebuilds the batch at every iteration~\cite{yu2022orca,
-kwon2023vllm}. Chunked prefill further limits prompt work and mixes a bounded
-prefill chunk with decode tokens, reducing generation stalls~\cite{
-agrawal2024sarathi,holmes2024fastgen}. This bound controls how much prefill work
-enters one iteration, but does not independently specify how often prefill is
-served: under a decode-first token budget, available prefill capacity depends
-on the current decode batch.
+Iteration-level scheduling and continuous batching make this tradeoff
+programmable~\cite{yu2022orca,kwon2023vllm}. Chunked prefill bounds the amount
+of prompt work admitted to one iteration and protects active generations by
+combining a bounded Prefill chunk with Decode work~\cite{agrawal2024sarathi,
+holmes2024fastgen}. However, the chunk bound and the long-run allocation of
+service opportunities are different controls. In a decode-protected mixed
+batch, the Prefill work left in an iteration depends on the current Decode
+batch; across iterations, the resulting P/D share is consequently coupled to
+queue composition rather than exposed as an independent scheduling decision.
 
-Physical prefill--decode disaggregation can provision the phases independently,
-but requires distinct instances and KV transfer~\cite{patel2024splitwise,
-zhong2024distserve}. Spatial multiplexing instead depends on concurrent kernels
-and controllable compute partitioning. We study the complementary deployment
-budget in which one tensor-parallel (TP) replica occupies the allocated devices
-and both phases retain its weights and KV cache locally.
+Several systems address this tension by changing the resource organization.
+P/D disaggregation provisions independent phase capacity, but introduces extra
+instances and KV movement~\cite{patel2024splitwise,zhong2024distserve,
+hu2024tetrinfer,jin2024pdserve,strati2024dejavu,qin2025mooncake}. Spatial or
+concurrent multiplexing shares storage while partitioning or interleaving
+device resources~\cite{duan2024muxserve,chen2026muxwise,hong2025semipd,
+shi2025nexus,lin2026bullet,gao2026duetserve}. These choices are valuable when
+their deployment primitives are available. We study the complementary regime
+where one TP replica must serve both phases without an independent P/D replica,
+KV transfer between replicas, or an assumed spatial partition.
 
-We present \system{}, a scheduler that separates state sharing from execution.
-It preserves chunked continuation, but each model iteration is prefill-only or
-decode-only. A selector exposes the long-run prefill service tendency as a
-configurable share, and work-conserving fallback serves the nonempty phase.
-This creates an explicit interface between TTFT and TPOT pressure. The benefit
-is conditional: prefill-only slots can reduce queueing when decode has TPOT
-slack, whereas they can harm a saturated decode queue.
+We present \system{}, which separates two decisions that are otherwise bundled
+inside mixed-batch construction. A slow SLO-reactive loop updates a target
+Prefill tendency from windowed TTFT/TPOT pressure; a fast token bucket converts
+that target into the phase for the next model iteration. The selected phase
+then invokes a bounded, phase-specific batch planner. Prefill continuation and
+KV state remain local, while queue fallback, phase-length constraints, and a KV
+boundary guard handle empty queues, switching, and allocation pressure. The
+result is an explicit iteration-level control surface for the TTFT--TPOT
+tradeoff, not a claim that phase-pure execution is intrinsically faster than
+mixed execution.
 
-Our contributions are: (1) identifying the chunk bound and cross-iteration
-phase share as distinct controls; (2) implementing bounded, phase-pure
-scheduling in a shared TP replica without weight duplication or KV transfer;
-and (3) evaluating both its gains and boundary on two Ascend 910B3 NPUs.
-Three-seed Azure-derived bursts show strict joint-SLO improvements, a large
-reconstructed MaaS workload supports the TTFT trend, and decode-heavy cases
-show that PD-TDM is not a universal replacement for mixed chunked prefill.
+Our contributions are threefold. First, we formulate cross-iteration P/D
+service allocation as a control dimension distinct from the per-iteration
+Prefill chunk bound. Second, we implement this separation as bounded
+\phasepure{} execution on a single TP replica, including continuation,
+token-bucket selection, SLO feedback, queue fallback, slice constraints, and KV
+safety. Third, we evaluate the resulting end-to-end scheduler against
+same-platform vLLM-Ascend chunked prefill, reporting both the Prefill-pressure
+region where joint-SLO goodput improves and the Decode-pressure boundary where
+mixed batching can remain preferable. The controller is part of the evaluated
+path, but its marginal contribution is not isolated from phase purity, chunking,
+and backend execution.

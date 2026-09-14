@@ -6,9 +6,10 @@
 ## 1. 一句话主线
 
 > vLLM-Ascend Chunked Prefill 限制单次 Prefill 工作量，但跨 iteration 的 P/D 服务份额
-> 仍隐式依赖 mixed batch。PD-TDM 保留 bounded Prefill，并以 pure-phase iterations
-> 显式配置阶段服务机会，在 Prefill 压力高且 Decode 有 TPOT 余量时提高联合 SLO
-> Goodput，同时在 deep-decode 区域明确让出优势。
+> 仍隐式依赖 mixed batch。PD-TDM 保留 bounded Prefill，并以 phase-level allocator
+> 显式配置阶段服务机会；后续 adaptive extension 根据 SLO pressure 更新这一倾向。
+> 当前结果在 Prefill 压力高且 Decode 有 TPOT 余量时提高联合 SLO Goodput，同时在
+> deep-decode 区域明确让出优势。
 
 ## 2. 直接对比范围
 
@@ -24,7 +25,8 @@
 ## 3. 三条 claim
 
 1. **设计：**PD-TDM 在一个共享 TP 副本内结合 bounded chunk continuation、pure-phase
-   iteration 和显式阶段服务份额，保持权重/KV 本地且不依赖空间分区。
+   iteration 和显式阶段服务份额，保持权重/KV 本地且不依赖空间分区；adaptive update
+   作为待验证扩展。
 2. **主结果：**在 Azure Prefill-pressure burst workload 的严格联合 SLO 下，PD-TDM
    相对同平台 vLLM-Ascend CP 提高 attainment/Goodput。
 3. **边界：**收益由 Prefill/Decode 服务压力和双 SLO 余量共同决定；宽松 SLO 出现
@@ -43,7 +45,8 @@
 
 - 两个独立旋钮：`prefill_chunk_tokens` 与 phase service share。
 - pure-P/pure-D invariant、partial Prefill continuation、queue-empty fallback。
-- ratio 只写静态调度倾向，不写在线最优控制；PID 不出现。
+- ratio 在当前结果中只写 configured phase tendency；adaptive extension 可写设计公式，
+  但不写在线最优控制或已验证收益；PID 不作为当前贡献。
 - 最多保留一个简单约束或公式，不放长算法伪代码。
 
 ### Page 3：实验设置与主结果（约 1.2 页）
@@ -59,6 +62,8 @@
 - 一个干净的 deep-decode 方向性负对照。
 - Related Work 一个紧凑段落：CP、物理分离、空间/时间复用。
 - 局限：单平台/模型、旧版本、F5 single seed、post-hoc MaaS sensitivity。
+- adaptive-vs-fixed 数字补齐后，替换 provisional evaluation paragraph；在此之前明确其
+  不支撑当前 headline。
 - 两三句 Conclusion。
 
 ### Page 5：参考文献
@@ -88,7 +93,8 @@
 - 不写“PD-TDM 优于 Sarathi-Serve”；只比较 vLLM-Ascend CP。
 - 不写“首次提出 temporal P/D multiplexing”。
 - 不写固定 mixed-batch tax、variable-query kernel 根因或旧 FIA 消融结论。
-- 不写 PID/在线控制器能自动找到最优 ratio。
+- 不写 PID/在线控制器已经自动找到最优 ratio；adaptive extension 在结果补齐前只能作为
+  待验证方法设计。
 - 不把 MaaS `1.2×` post-hoc sensitivity 当成原始预设 SLO。
 - 不把 F5 single-seed 负区精确百分比推广成稳定容量结论。
 - 不以 `+403%/+619%` 作为摘要 headline；优先用 absolute attainment pp。

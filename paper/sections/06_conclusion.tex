@@ -1,10 +1,10 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-PD-TDM separates a bounded prefill chunk from the cross-iteration service share
-between prefill and decode. It keeps weights and KV state in one shared TP
-replica while scheduling phase-pure iterations. On two Ascend 910B3 NPUs, this
-design improves joint-SLO attainment for prefill-heavy bursts and shifts TTFT
-left on a reconstructed MaaS trace. Decode-heavy counterexamples provide the
-necessary qualification: temporal phase isolation is useful when decode has
-latency slack, and can lose when TPOT is already tight.
+PD-TDM exposes cross-iteration Prefill/Decode allocation on a single
+tensor-parallel replica through bounded phase-pure iterations, a token-bucket
+selector, and SLO-pressure feedback. On two Ascend 910B3 NPUs, the integrated
+path improves joint-SLO goodput in Prefill-pressure bursts and shifts TTFT on a
+fixed-ratio MaaS replay, while exploratory boundaries show no universal
+advantage. These results support the integrated policy under the tested
+configuration, not controller-only causality or an optimal ratio.

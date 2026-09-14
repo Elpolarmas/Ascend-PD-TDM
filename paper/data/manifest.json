@@ -1,0 +1,42 @@
+{
+  "paper": "PD-TDM ICASSP 2027 draft",
+  "generated_on": "2026-09-13",
+  "source_commit": "7e9c9b2ffe3132bc688a61dfe46c437bcec5913c (base HEAD; manuscript working tree is dirty)",
+  "entries": [
+    {
+      "id": "fig_t6_strict_slo",
+      "source": "results/phase_2_post/m31fix_phase1_pointwise.json",
+      "script": "experiments/posthoc_m31fix_phase1.py",
+      "command": "python3 experiments/posthoc_m31fix_phase1.py",
+      "window_s": [30.0, 90.0],
+      "aggregation": "median across three seeds; arrival-cohort denominator; goodput divided by 60 s",
+      "configuration": {
+        "model": "Qwen3-8B",
+        "hardware": "2x Ascend 910B3, TP=2",
+        "cp_outer_budget": 2048,
+        "pdtdm_outer_budget": 8192,
+        "prefill_cap": 2048
+      },
+      "caveat": "End-to-end configuration comparison; equal-B CP is shown as a reference, but the direct claim is not a scheduler-only ablation."
+    },
+    {
+      "id": "table_maas",
+      "source": [
+        "results/maas_replay/maas_sarathi_rs0.10.json",
+        "results/maas_replay/maas_pdtdm_rs0.10.json"
+      ],
+      "derived": "paper/data/maas_metrics.json",
+      "script": "experiments/posthoc_maas_paper.py",
+      "command": "python3 experiments/posthoc_maas_paper.py",
+      "window_s": [30.0, 4560.0],
+      "aggregation": "arrival-cohort denominator; unmatched telemetry is non-attainment; active interval goodput",
+      "configuration": {
+        "model": "Qwen3-8B",
+        "hardware": "2x Ascend 910B3, TP=2",
+        "pdtdm_controller": "static ratio 0.30",
+        "posthoc_slo": "1.2x of 936/216 ms ideal latency"
+      },
+      "caveat": "Single compressed trace replay; post-hoc 1.2x SLO sensitivity, not adaptive-controller evidence."
+    }
+  ]
+}

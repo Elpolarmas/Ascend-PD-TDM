@@ -1,21 +1,68 @@
-\section{Problem and Metric}
+\section{Problem and Metrics}
 \label{sec:motivation}
 
-Let an iteration have token budget $B$, prefill bound $C$, and $D_t$ active
-decode tokens. A decode-first mixed scheduler can admit prefill work
-$P_t\leq\min(C,B-D_t)$. Thus $C$ bounds a chunk, but the current decode batch
-implicitly determines the prefill service left in that iteration. PD-TDM
-separates the controls: a prefill iteration admits at most
-$P_t\leq\min(C,B)$ prompt tokens, while a phase share determines how frequently
-prefill is selected when both queues contain work.
-
-We evaluate this exchange with request-level joint-SLO attainment and goodput.
-For requests arriving in measurement window $T$, output length $o_i$, and
-thresholds $S_T,S_P$, we use
+Consider an iteration with outer token budget $B$, Prefill bound $C$, and $D_t$
+active Decode tokens. $B$ is the total scheduled-token budget; $C$ additionally
+caps prompt work when configured. A decode-first mixed scheduler admits
 \begin{equation}
-G=\frac{1}{T}\sum_i o_i\,
-\mathbf{1}[\mathrm{TTFT}_i<S_T\land\mathrm{TPOT}_i<S_P].
+    P_t \leq \min(C, B-D_t),
+    \label{eq:mixed-budget}
 \end{equation}
-Here TPOT is the per-request mean inter-token time, not a bound on every token
-interval. Goodput can differ at similar raw throughput when latency
-distributions fall on different sides of the joint threshold.
+where $P_t$ is the number of prompt tokens advanced in the iteration. The
+bound $C$ limits a single chunk, but the current Decode batch determines how
+much of the token budget remains for Prefill. The two decisions are therefore
+coupled: the scheduler chooses $(P_t,D_t)$ inside an iteration and the queue
+state indirectly determines the phase share over time.
+
+PD-TDM exposes the second decision. It first selects a phase
+$u_t\in\{P,D\}$ and then builds its batch subject to
+\begin{equation}
+ u_t=P \Rightarrow D_t=0, \qquad
+ u_t=D \Rightarrow P_t=0, \qquad P_t\leq C.
+ \label{eq:phase-invariant}
+\end{equation}
+The phase decision is made only when both queues compete. A target
+$r_k\in[0,1]$ expresses the desired Prefill tendency in controller window $k$;
+it is a credit rate, not a wall-clock P:D ratio, because Prefill and Decode
+iterations have different durations and queue fallbacks can override it. The
+evaluated controller updates this target at a slower timescale from windowed
+TTFT and TPOT pressure, while the bucket applies it at every iteration. Let
+$v_{P,k}$ and $v_{D,k}$ be the measured violation rates and let $q$ be the
+target violation rate. The update is summarized by
+\begin{equation}
+ r_{k+1}=\Pi_{[r_{\min},r_{\max}]}
+ \left((1-\alpha)r_k+\alpha\left[r_k+\kappa(e_{P,k}-e_{D,k})\right]\right),
+ \label{eq:ratio-update}
+\end{equation}
+where $e_{P,k}=[v_{P,k}-q]_+$ and $e_{D,k}=[v_{D,k}-q]_+$, and $\Pi$ clips to
+the configured range. This is the active update: persistent TPOT saturation
+zeros its error; cold or KV-frozen windows hold $r_k$, as does a sub-deadband
+change. The main runs disable the optional queue-age term and use $q=0.05$,
+$\kappa=0.5$, $\alpha=0.3$,
+$r_0=0.30$, $r_{\min}=0.05$, and $r_{\max}=0.80$; the controller updates
+every eight scheduler iterations. A $0.02$ deadband, a 16-sample warm-up,
+and a two-tick TPOT-saturation detector are also enabled. We evaluate the
+complete two-timescale path, but do not isolate the marginal gain of this
+update from phase purity, chunking, or backend execution.
+
+For all requests arriving in measurement window $T$, let $o_i$ be the generated
+output length and let $S_T,S_D$ be TTFT and TPOT SLOs. Failed requests and
+requests without matched latency telemetry are counted as non-attainments and
+contribute zero to goodput.
+We report request attainment and output-token goodput as
+\begin{equation}
+ \begin{aligned}
+ A&=\frac{1}{N_T}\sum_i I_i,
+ &G&=\frac{1}{T}\sum_i o_i I_i,\\[-1pt]
+ I_i&=\mathbf{1}[\mathrm{TTFT}_i<S_T\land\mathrm{TPOT}_i<S_D].
+ \end{aligned}
+ \label{eq:metrics}
+\end{equation}
+TPOT is the per-request mean inter-token time; its cross-request percentile is
+not a guarantee on every individual token interval. For T6, $N_T$ counts
+arrivals in $[30,90)$~s and $T=60$~s; latency summaries are computed on
+successful records with matched telemetry. Thus $G$ is arrival-cohort goodput,
+not completion-window throughput: output tokens from a qualifying cohort
+request are counted even if it finishes after the cohort end. Equation~\ref{eq:metrics} avoids
+replacing token-weighted goodput with raw throughput multiplied by request
+attainment, which is not valid for variable-length outputs.

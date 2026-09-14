@@ -20,7 +20,8 @@
 | C8 | SUPPORTED | MaaS v12 上 PD-TDM 的 TTFT mean/p99 为 808/1180ms，vLLM-Ascend CP 为 952/1316ms | MaaS v12，两次大规模 replay 方向一致 | 聚合 trace、log-normal 重建、单 seed；只称流量形态接近 Agent 服务 | Evaluation |
 | C9 | SUPPORTED | MaaS 原始 ×3 SLO 近 ceiling；在 ×1.2 post-hoc SLO 下 PD-TDM goodput 高约 50% | V12 report/raw requests | 必须明确是 sensitivity analysis，不是原始预设 SLO 结果 | Evaluation |
 | C10 | SUPPORTED | 两 NPU 预算下 1P1D reference 受到 TP=1 Prefill capacity 和 KV/proxy 开销限制 | c4_pd burst + steady | 不代表多节点 P/D 分离系统的一般表现 | Evaluation/Limitations |
-| C11 | SUPPORTED | ratio 是 P/D 竞争时的阶段调度倾向，提供双 SLO 资源交换接口 | selector 实现、T6/MaaS 配置 | 不等于 wall-clock 份额；当前在线控制器尚未证明能找到最优 ratio | Motivation/Design/Evaluation |
+| C11 | SUPPORTED | configured ratio 是 P/D 竞争时的阶段调度倾向，提供双 SLO 资源交换接口 | selector 实现、T6/MaaS 配置 | 不等于 wall-clock 份额；当前结果不证明在线控制器能找到最优 ratio | Motivation/Design/Evaluation |
+| C12 | PROVISIONAL | 可用慢回路根据 TTFT/TPOT pressure 更新 phase tendency，并由快回路平滑执行 | `SLOReactiveController`、Eq. (1) 设计 | 尚无 adaptive-vs-fixed 的独立验证；不得归因当前 T6/MaaS headline | Design/Future Evaluation |
 
 ## 2. 方法贡献
 
@@ -28,7 +29,8 @@
    TP 模型副本上满足 TTFT/TPOT 双 SLO；chunk bound 只约束单次 Prefill 工作量，不能
    独立表达跨 iteration 的阶段服务份额。
 2. **System design**：实现“状态耦合、执行解耦”的细粒度 P/D 时分复用，以 bounded
-   pure-P/pure-D iteration、显式 ratio、队列 fallback 和本地 KV 状态交换阶段机会。
+   pure-P/pure-D iteration、显式 phase tendency、队列 fallback 和本地 KV 状态交换阶段机会；
+   自适应 ratio 更新作为待验证扩展，不作为当前 headline 收益来源。
 3. **Boundary-oriented evaluation**：通过 Azure、synthetic matrix 和 MaaS trace 展示
    联合 Goodput 收益、SLO ceiling、长输入短输出胜区及 deep-decode 反例。
 
@@ -81,7 +83,8 @@ PD-TDM 将 chunk 大小和跨 iteration 阶段份额解耦
 | mixed/pure 因果隔离不足 | C3 | 等 Prefill/Decode 工作量 controlled microbenchmark |
 | synthetic matrix 单 seed | C6/C7 | 胜/边界/负三个无 timeout 代表 cell 各补 3 seed |
 | 单模型/单平台 | C4/C6 | 服务器恢复后补小模型或另一硬件平台 |
-| 静态 ratio 的实证交换价值未验证 | C11 | 静态 sensitivity 或将 claim 限为配置接口；动态控制不进入 R0 |
+| 静态 ratio 的实证交换价值未验证 | C11 | 静态 sensitivity 或将 claim 限为配置接口；动态控制不进入当前 headline |
+| adaptive-vs-fixed 未隔离 | C12 | 同 trace 内加入 workload/SLO regime shift，比较 fixed、oracle fixed 和 adaptive |
 
 ## 6. 当前无补实验条件下的 claim 策略
 

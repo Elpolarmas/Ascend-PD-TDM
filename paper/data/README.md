@@ -15,6 +15,14 @@ Every manifest entry should record:
 - source commit;
 - caveats such as timeout filtering or single-seed status.
 
-`figure_metrics.json` is the current machine-readable output of
-`experiments/plot_paper_figures_offline.py`. It records T6 headline cells, the
-F5 matrix values and caveats, and MaaS Goodput recomputed from raw requests.
+`figure_metrics.json` is the current machine-readable output of the paper
+aggregation workflow. It records T6 headline cells, the F5 matrix values and
+caveats, and the MaaS values recomputed from raw requests. The MaaS-specific
+reaggregation is reproducible with:
+
+```bash
+python3 experiments/posthoc_maas_paper.py
+```
+
+It uses the active compressed arrival interval `[30,4560)` seconds and counts
+unmatched telemetry as a failed SLO attainment.

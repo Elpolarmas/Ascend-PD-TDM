@@ -1,0 +1,81 @@
+{
+  "method": "arrival-cohort reaggregation",
+  "active_window_rule": "[30, ceil(max arrival time)) s",
+  "active_end_s": 4560,
+  "ideal_latency_ms": {
+    "ttft": 936.0,
+    "tpot": 216.0
+  },
+  "methods": {
+    "sarathi": {
+      "raw_path": "results/maas_replay/maas_sarathi_rs0.10.json",
+      "cohort_window_s": [
+        30.0,
+        4560
+      ],
+      "goodput_denominator_s": 4530.0,
+      "n_in_window": 35345,
+      "n_matched": 35324,
+      "n_unmatched": 21,
+      "ttft_ms": {
+        "mean": 952.16,
+        "p99": 1316.27
+      },
+      "tpot_ms_mean": {
+        "mean": 236.33,
+        "p99": 256.93
+      },
+      "slo": {
+        "x3": {
+          "ttft_ms": 2808.0,
+          "tpot_ms": 648.0,
+          "n_meet": 35323,
+          "attainment": 0.9993775640118828,
+          "goodput_output_tok_s": 1238.3359823399558
+        },
+        "x1.2": {
+          "ttft_ms": 1123.2,
+          "tpot_ms": 259.2,
+          "n_meet": 22409,
+          "attainment": 0.6340076389871269,
+          "goodput_output_tok_s": 753.7090507726269
+        }
+      }
+    },
+    "pdtdm": {
+      "raw_path": "results/maas_replay/maas_pdtdm_rs0.10.json",
+      "cohort_window_s": [
+        30.0,
+        4560
+      ],
+      "goodput_denominator_s": 4530.0,
+      "n_in_window": 35345,
+      "n_matched": 35342,
+      "n_unmatched": 3,
+      "ttft_ms": {
+        "mean": 808.44,
+        "p99": 1179.97
+      },
+      "tpot_ms_mean": {
+        "mean": 221.75,
+        "p99": 251.95
+      },
+      "slo": {
+        "x3": {
+          "ttft_ms": 2808.0,
+          "tpot_ms": 648.0,
+          "n_meet": 35341,
+          "attainment": 0.9998868298203424,
+          "goodput_output_tok_s": 1239.0207505518763
+        },
+        "x1.2": {
+          "ttft_ms": 1123.2,
+          "tpot_ms": 259.2,
+          "n_meet": 32728,
+          "attainment": 0.9259584099589758,
+          "goodput_output_tok_s": 1135.2971302428257
+        }
+      }
+    }
+  }
+}

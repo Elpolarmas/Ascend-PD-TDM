@@ -2,17 +2,21 @@
   "t6": {
     "conv": {
       "k": 3.0,
-      "pd_attainment": 0.638,
-      "sarathi_attainment": 0.29,
-      "pd_goodput_tok_s": 3395.85,
-      "sarathi_goodput_tok_s": 1525.43
+      "pd_attainment": 0.691,
+      "sarathi_attainment": 0.354,
+      "pd_goodput_tok_s": 2499.60,
+      "sarathi_goodput_tok_s": 1318.18,
+      "window_s": [30.0, 90.0],
+      "aggregation": "median of three seeds; arrivals selected by arrival_time_s; unmatched records remain in denominator as non-attainments"
     },
     "code": {
       "k": 4.9,
-      "pd_attainment": 0.804,
-      "sarathi_attainment": 0.065,
-      "pd_goodput_tok_s": 438.03,
-      "sarathi_goodput_tok_s": 87.1
+      "pd_attainment": 0.795,
+      "sarathi_attainment": 0.057,
+      "pd_goodput_tok_s": 281.68,
+      "sarathi_goodput_tok_s": 56.43,
+      "window_s": [30.0, 90.0],
+      "aggregation": "median of three seeds; arrivals selected by arrival_time_s; unmatched records remain in denominator as non-attainments"
     }
   },
   "f5": {
@@ -64,20 +68,28 @@
   },
   "maas": {
     "sarathi": {
-      "n_valid_requests": 35324,
-      "window_s": 34170.0,
-      "x1.2_attainment": 0.634384554410599,
-      "x1.2_goodput_output_tok_s": 99.92104184957564,
-      "x3.0_attainment": 0.9999716906352621,
-      "x3.0_goodput_output_tok_s": 164.16921275973075
+      "n_in_window": 35345,
+      "n_matched": 35324,
+      "n_unmatched": 21,
+      "window_s": [30.0, 4560.0],
+      "goodput_denominator_s": 4530.0,
+      "x1.2_attainment": 0.6340076389871269,
+      "x1.2_goodput_output_tok_s": 753.7090507726269,
+      "x3.0_attainment": 0.9993775640118828,
+      "x3.0_goodput_output_tok_s": 1238.3359823399558,
+      "aggregation": "arrival-cohort denominator; unmatched records are non-attainments"
     },
     "pdtdm": {
-      "n_valid_requests": 35342,
-      "window_s": 34170.0,
-      "x1.2_attainment": 0.9260370097900515,
-      "x1.2_goodput_output_tok_s": 150.5091015510682,
-      "x3.0_attainment": 0.9999717050534774,
-      "x3.0_goodput_output_tok_s": 164.2599941469125
+      "n_in_window": 35345,
+      "n_matched": 35342,
+      "n_unmatched": 3,
+      "window_s": [30.0, 4560.0],
+      "goodput_denominator_s": 4530.0,
+      "x1.2_attainment": 0.9259584099589758,
+      "x1.2_goodput_output_tok_s": 1135.2971302428257,
+      "x3.0_attainment": 0.9998868298203424,
+      "x3.0_goodput_output_tok_s": 1239.0207505518763,
+      "aggregation": "arrival-cohort denominator; unmatched records are non-attainments"
     }
   }
 }

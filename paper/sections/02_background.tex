@@ -1,32 +1,42 @@
 \section{Background and Related Work}
 \label{sec:background}
 
-\textbf{Aggregated serving.}
-Orca introduced iteration-level scheduling, and vLLM's PagedAttention enables
-memory-efficient continuous batching~\cite{yu2022orca,kwon2023vllm}. Long
-prefills can nevertheless delay generation. Sarathi-Serve bounds prefill chunks
-and constructs decode-maximal mixed batches; Dynamic SplitFuse similarly splits
-and combines prompt and generation work~\cite{agrawal2024sarathi,
-holmes2024fastgen}. PD-TDM retains this prior bounded-prefill contribution. Its
-additional control is the opportunity assigned to each phase across iterations.
-Our measured baseline is the native chunked-prefill path in vLLM-Ascend on the
-same NPUs, denoted \baseline{}; we do not claim a cross-platform comparison to
-the Sarathi-Serve system.
+\textbf{Iteration-level and mixed-batch serving.}
+Orca established iteration-level scheduling, and vLLM made continuous batching
+practical with PagedAttention~\cite{yu2022orca,kwon2023vllm}. Sarathi-Serve
+introduced bounded Prefill chunks and decode-maximal mixed batches to reduce
+generation stalls~\cite{agrawal2024sarathi}; DeepSpeed-FastGen follows the same
+broad direction by splitting and combining prompt and generation work
+~\cite{holmes2024fastgen}. PD-TDM retains bounded Prefill, but changes the
+control surface: instead of selecting the P/D composition of every mixed
+iteration, it selects which phase receives the next service quantum. Our
+measured baseline is the native vLLM-Ascend chunked-prefill path on the same
+hardware, not a cross-platform Sarathi-Serve reimplementation.
 
-\textbf{Disaggregation and spatial multiplexing.}
-Splitwise and DistServe place prefill and decode on different instances, while
-Mooncake builds a KV-cache-centric distributed architecture~\cite{
-patel2024splitwise,zhong2024distserve,qin2025mooncake}. These designs gain
-independent phase capacity at the cost of additional replicas and state
-movement. MuxWise and semi-PD share storage while concurrently partitioning GPU
-compute between the phases~\cite{chen2026muxwise,hong2025semipd}. Their spatial
-isolation is orthogonal to PD-TDM, which gives the entire TP replica to one
-phase at a time.
+\textbf{Disaggregation and SLO-oriented allocation.}
+Splitwise and DistServe separate Prefill and Decode to reduce interference and
+optimize TTFT/TPOT-oriented goodput~\cite{patel2024splitwise,
+zhong2024distserve}; TetriInfer, P/D-Serve, and DejaVu study related
+disaggregated execution and KV movement problems~\cite{hu2024tetrinfer,
+jin2024pdserve,strati2024dejavu}. Mooncake makes KV storage and movement a
+first-class distributed serving resource~\cite{qin2025mooncake}. TaiChi is the
+closest prior work in high-level objective: it combines aggregation and
+disaggregation with heterogeneous P-heavy/D-heavy instances and request-level
+latency shifting~\cite{wang2025taichi}. We share the dual-SLO perspective, but
+not the control object. TaiChi places requests across heterogeneous instances;
+PD-TDM keeps the topology fixed and allocates the next iteration to a phase on
+one TP replica. We therefore do not claim SLO-aware goodput as a new
+objective.
 
-\textbf{Temporal orchestration.}
-EcoServe is the closest prior design: it temporally disaggregates phases within
-an instance and rolls activation across multiple cooperating instances to keep
-prefill available~\cite{du2026ecoserve}. PD-TDM does not claim to originate
-temporal disaggregation. It instead studies bounded, iteration-granular phase
-scheduling when the deployment has only one shared TP replica, and explicitly
-reports the decode-pressure region in which this choice fails.
+\textbf{Spatial and temporal multiplexing.}
+MuxServe studies flexible spatial-temporal placement for multiple model services
+\cite{duan2024muxserve}. MuxWise, semi-PD, Nexus, Bullet, and DuetServe explore
+unified storage, intra-device partitioning, or dynamic spatial-temporal
+orchestration~\cite{chen2026muxwise,hong2025semipd,shi2025nexus,
+lin2026bullet,gao2026duetserve}. EcoServe is especially close because it uses
+temporal phase orchestration, but coordinates role changes across cooperating
+instances in a commodity-GPU cluster~\cite{du2026ecoserve}. PD-TDM does not
+claim to originate temporal disaggregation. Its narrower question is whether
+bounded, iteration-granular phase allocation provides a useful TTFT--TPOT
+operating point when both phases remain on one TP replica and extra replicas or
+spatial partitioning are outside the deployment budget.
